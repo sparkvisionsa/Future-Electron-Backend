@@ -4,7 +4,8 @@ const authMiddleware = require('../../application/middleware/authMiddleware')
 
 const router = express.Router();
 
-router.get('/reportExistenceCheck/:reportId', authMiddleware, reportController.reportExistenceCheck);
+router.get('/reportExistenceCheck/:reportId', reportController.reportExistenceCheck);
+router.get('/checkMissingPages/:reportId', reportController.checkMissingPages);
 
 router.post('/createReport', reportController.createReport);
 router.put('/addCommonFields', reportController.addCommonFields);

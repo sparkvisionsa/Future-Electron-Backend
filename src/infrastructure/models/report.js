@@ -17,6 +17,7 @@ const reportSchema = new mongoose.Schema({
     special_assumptions: { type: String },
     value: { type: String },
     valuation_currency: { type: String },
+    pg_count: { type: Number },
 
 
     report_asset_file: { type: String },

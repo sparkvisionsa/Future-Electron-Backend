@@ -1,6 +1,7 @@
 const { createReportUC } = require('../../application/services/report/uploadAssetsToDB.uc');
 const { reportExistenceCheckUC } = require('../../application/services/report/reportExistenceCheck.uc');
 const { addCommonFields } = require('../../application/services/report/addCommonFields.uc');
+const { checkMissingPagesUC } = require('../../application/services/report/checkMissingPages.uc');
 
 const reportController = {
     async createReport(req, res) {
@@ -34,6 +35,19 @@ const reportController = {
             }
         } catch (error) {
             console.error('Error checking report existence:', error);
+            res.status(500).json({ success: false, message: error.message });
+        }
+    },
+
+    async checkMissingPages(req, res) {
+        try {
+            const { reportId } = req.params;
+            const { success, missingPages, hasMissing } = await checkMissingPagesUC(reportId);
+
+            res.status(200).json({ success, missingPages, hasMissing });
+
+        } catch (error) {
+            console.error('Error checking missing pages:', error);
             res.status(500).json({ success: false, message: error.message });
         }
     },
