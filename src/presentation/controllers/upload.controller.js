@@ -2,6 +2,7 @@ const xlsx = require("xlsx");
 const path = require("path");
 const Report = require("../../infrastructure/models/UrgentReport");
 const { title } = require("process");
+const { randomUUID } = require("crypto");   // 👈 add this
 
 
 function normalizeKey(str) {
@@ -71,6 +72,8 @@ exports.processUpload = async (req, res) => {
       });
     }
 
+    const batch_id = randomUUID();
+
     // ----------------------------------------------------
     // 1. Get Excel file & sheets
     // ----------------------------------------------------
@@ -92,7 +95,7 @@ exports.processUpload = async (req, res) => {
     });
 
 
-    
+
     if (!reportInfo.length) {
       return res.status(400).json({
         status: "failed",
@@ -106,32 +109,32 @@ exports.processUpload = async (req, res) => {
 
 
     // Read raw values exactly as they come from Excel row
-const valuedAtRaw =
-  report.valued_at ||
-  report["valued_at\n"] ||
-  report["Valued At"] ||
-  "";
+    const valuedAtRaw =
+      report.valued_at ||
+      report["valued_at\n"] ||
+      report["Valued At"] ||
+      "";
 
-const submittedAtRaw =
-  report.submitted_at ||
-  report["submitted_at\n"] ||
-  report["Submitted At"] ||
-  "";
+    const submittedAtRaw =
+      report.submitted_at ||
+      report["submitted_at\n"] ||
+      report["Submitted At"] ||
+      "";
 
-const inspectionDateRaw =
-  report.inspection_date ||
-  report["inspection_date\n"] ||
-  report["Inspection Date"] ||
-  "";
+    const inspectionDateRaw =
+      report.inspection_date ||
+      report["inspection_date\n"] ||
+      report["Inspection Date"] ||
+      "";
 
-// Convert to proper JS Date (from Excel serial or DD/MM/YYYY)
-const valued_at = parseExcelDate(valuedAtRaw);
-const submitted_at = parseExcelDate(submittedAtRaw);
-const inspection_date = parseExcelDate(inspectionDateRaw);
+    // Convert to proper JS Date (from Excel serial or DD/MM/YYYY)
+    const valued_at = parseExcelDate(valuedAtRaw);
+    const submitted_at = parseExcelDate(submittedAtRaw);
+    const inspection_date = parseExcelDate(inspectionDateRaw);
 
-console.log("valuedAt raw:", valuedAtRaw, "→", valued_at);
-console.log("submittedAt raw:", submittedAtRaw, "→", submitted_at);
-console.log("inspectionDate raw:", inspectionDateRaw, "→", inspection_date);
+    console.log("valuedAt raw:", valuedAtRaw, "→", valued_at);
+    console.log("submittedAt raw:", submittedAtRaw, "→", submitted_at);
+    console.log("inspectionDate raw:", inspectionDateRaw, "→", inspection_date);
 
 
 
@@ -161,20 +164,37 @@ console.log("inspectionDate raw:", inspectionDateRaw, "→", inspection_date);
     // ----------------------------------------------------
     // 3. Prepare PDF mapping (file name without extension must match asset_name)
     // ----------------------------------------------------
-   // 3. Prepare PDF mapping
-const pdfFiles = req.files["pdfs"] || [];
-const pdfMap = {};
+    // 3. Prepare PDF mapping
+    // Helper to fix Latin1-misread UTF-8
+    function fixMojibake(str) {
+      if (!str) return "";
+      // reinterpret string bytes as latin1, then decode as utf8
+      return Buffer.from(str, "latin1").toString("utf8");
+    }
 
-pdfFiles.forEach((file) => {
-  const baseName = path.parse(file.originalname).name; // without extension
-  const key = normalizeKey(baseName);                  // normalized Arabic plate
-  const fullPath = path.resolve(file.path);            // ✅ absolute path
+    // 3. Prepare PDF mapping
+    const pdfFiles = req.files["pdfs"] || [];
+    const pdfMap = {};
 
-  pdfMap[key] = fullPath;
-});
+    pdfFiles.forEach((file) => {
+      const rawName = file.originalname;
 
-console.log("PDF files received:", pdfFiles.length);
-console.log("PDF map keys (normalized):", Object.keys(pdfMap));
+      // Try to recover proper Arabic from mojibake
+      const fixedName = fixMojibake(rawName);
+
+      console.log("PDF rawName:", rawName);
+      console.log("PDF fixedName:", fixedName);
+
+      const baseName = path.parse(fixedName).name; // without extension
+      const key = normalizeKey(baseName);          // normalized Arabic plate
+      const fullPath = path.resolve(file.path);    // absolute path
+
+      pdfMap[key] = fullPath;
+    });
+
+    console.log("PDF files received:", pdfFiles.length);
+    console.log("PDF map keys (normalized):", Object.keys(pdfMap));
+
 
     // ----------------------------------------------------
     // 4. Build all documents for MongoDB
@@ -186,16 +206,16 @@ console.log("PDF map keys (normalized):", Object.keys(pdfMap));
       const asset_id = i + 1;
 
       // ✅ Asset code = Arabic plate number from asset_name
-     // Prefer the column that actually matches your PDF names.
-// If your PDF names are like the plate number in asset_name, do:
-        const rawCode =
+      // Prefer the column that actually matches your PDF names.
+      // If your PDF names are like the plate number in asset_name, do:
+      const rawCode =
         asset.asset_name ||                // 👈 use this if it matches PDFs
         asset["Origin/Asset Being Valued\n"] ||
         asset["code"] ||
         asset["code.1"] ||
         "";
 
-    const trimmedCode = normalizeKey(rawCode);
+      const trimmedCode = normalizeKey(rawCode);
 
       // ✅ Asset value from 'final_value'
       const final_value = Number(asset.final_value) || 0;
@@ -207,6 +227,7 @@ console.log("PDF map keys (normalized):", Object.keys(pdfMap));
       const pdf_path = trimmedCode ? pdfMap[trimmedCode] || null : null;
 
       docs.push({
+        batch_id,
         title: report.title,
         client_name: clientName,
         purpose_id: report.purpose_id,
@@ -215,6 +236,7 @@ console.log("PDF map keys (normalized):", Object.keys(pdfMap));
         valued_at,
         submitted_at,
         inspection_date,
+        number_of_macros: 1,
 
         assumptions: report.assumptions,
         special_assumptions: report.special_assumptions,
@@ -265,6 +287,7 @@ console.log("PDF map keys (normalized):", Object.keys(pdfMap));
     return res.json({
       status: "success",
       inserted: result.length,
+      batchId: batch_id,
       data: result,
     });
   } catch (err) {

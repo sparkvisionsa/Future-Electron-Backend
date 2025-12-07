@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 
 const urgentSchema = new mongoose.Schema({
   title: String,
+  batch_id: String,
   client_name: String,
   purpose_id: Number,
   value_premise_id: Number,
@@ -11,6 +12,7 @@ const urgentSchema = new mongoose.Schema({
   submitted_at: Date,
   inspection_date: Date,
   assumptions: Number,
+  number_of_macros: Number,
   special_assumptions: Number,
   telephone: String,
   email: String,
