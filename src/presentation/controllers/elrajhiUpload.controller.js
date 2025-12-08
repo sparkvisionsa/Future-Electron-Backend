@@ -3,7 +3,7 @@ const xlsx = require("xlsx");
 const path = require("path");
 const fs = require("fs");
 
-const ElrajhiReport = require("../../infrastructure/models/ElrajhiReport");
+const UrgentReport = require("../../infrastructure/models/UrgentReport");
 
 // ---------- helpers ----------
 
@@ -14,6 +14,30 @@ function normalizeKey(str) {
     .normalize("NFC")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function getPlaceholderPdfPath() {
+  const placeholderPath = path.resolve(
+    "uploads",
+    "static",
+    "dummy_placeholder.pdf"
+  );
+
+  if (!fs.existsSync(placeholderPath)) {
+    throw new Error(
+      "Placeholder PDF missing at uploads/static/dummy_placeholder.pdf"
+    );
+  }
+
+  return placeholderPath;
+}
+
+
+// 🔹 Same mojibake fix you used in processUpload
+function fixMojibake(str) {
+  if (!str) return "";
+  // reinterpret string bytes as latin1, then decode as utf8
+  return Buffer.from(str, "latin1").toString("utf8");
 }
 
 function parseExcelDate(value) {
@@ -50,11 +74,11 @@ function parseExcelDate(value) {
   return null;
 }
 
-function ensureTempPdf(batchId, assetId) {
+function ensureTempPdf(batch_id, assetId) {
   const tempDir = path.join("uploads", "temp");
   fs.mkdirSync(tempDir, { recursive: true });
 
-  const tempFileName = `temp-${batchId}-${assetId}.pdf`;
+  const tempFileName = `temp-${batch_id}-${assetId}.pdf`;
   const tempPath = path.join(tempDir, tempFileName);
 
   if (!fs.existsSync(tempPath)) {
@@ -100,7 +124,7 @@ function detectValuerColumnsOrThrow(exampleRow) {
   if (!hasBaseId || !hasBaseName || !hasBasePct) {
     throw new Error(
       "Market sheet must contain headers 'valuerId', 'valuerName', and 'percentage'. " +
-        "If there are multiple valuers, Excel will create valuerId_1, valuerId_2, etc."
+      "If there are multiple valuers, Excel will create valuerId_1, valuerId_2, etc."
     );
   }
 
@@ -149,19 +173,18 @@ function buildValuersForAsset(assetRow, valuerCols) {
 
     let percentage = 0;
 
-if (pctRaw !== undefined && pctRaw !== null && pctRaw !== "") {
-  const num = Number(pctRaw);
+    if (pctRaw !== undefined && pctRaw !== null && pctRaw !== "") {
+      const num = Number(pctRaw);
 
-  if (!Number.isNaN(num)) {
-    // If value is between 0 and 1, Excel likely stored it as a fraction (0.6 => 60%)
-    if (num >= 0 && num <= 1) {
-      percentage = num * 100;
-    } else {
-      percentage = num;
+      if (!Number.isNaN(num)) {
+        // If value is between 0 and 1, Excel likely stored it as a fraction (0.6 => 60%)
+        if (num >= 0 && num <= 1) {
+          percentage = num * 100;
+        } else {
+          percentage = num;
+        }
+      }
     }
-  }
-}
-
 
     valuers.push({
       valuerId: id != null && id !== "" ? String(id) : "", // you can enforce non-empty later if you want
@@ -222,21 +245,21 @@ exports.processElrajhiExcel = async (req, res) => {
     // 2) Parse dates from report info
     const valued_at = parseExcelDate(
       report.valued_at ||
-        report["valued_at\n"] ||
-        report["Valued At"] ||
-        report["valued at"]
+      report["valued_at\n"] ||
+      report["Valued At"] ||
+      report["valued at"]
     );
     const submitted_at = parseExcelDate(
       report.submitted_at ||
-        report["submitted_at\n"] ||
-        report["Submitted At"] ||
-        report["submitted at"]
+      report["submitted_at\n"] ||
+      report["Submitted At"] ||
+      report["submitted at"]
     );
     const inspection_date = parseExcelDate(
       report.inspection_date ||
-        report["inspection_date\n"] ||
-        report["Inspection Date"] ||
-        report["inspection date"]
+      report["inspection_date\n"] ||
+      report["Inspection Date"] ||
+      report["inspection date"]
     );
 
     // 3) Detect valuer columns – THROW if headers DON'T match
@@ -250,26 +273,37 @@ exports.processElrajhiExcel = async (req, res) => {
       });
     }
 
-    // 4) Build pdfMap from uploaded PDFs
+    // 4) Build pdfMap from uploaded PDFs (with mojibake fix)
     const pdfMap = {};
     pdfFiles.forEach((file) => {
-      const baseName = path.parse(file.originalname).name; // without extension
+      const rawName = file.originalname;          // e.g. "Ø¯ Ù Øµ 1220.pdf"
+      const fixedName = fixMojibake(rawName);     // "د م ص 1220.pdf" (hopefully)
+
+      console.log("PDF rawName:", rawName);
+      console.log("PDF fixedName:", fixedName);
+
+      const baseName = path.parse(fixedName).name; // without extension
       const key = normalizeKey(baseName);
       const fullPath = path.resolve(file.path);
       pdfMap[key] = fullPath;
     });
 
-    // 5) Generate batchId for this upload
-    const batchId = `ELR-${Date.now()}`;
+    console.log("PDF files received:", pdfFiles.length);
+    console.log("PDF map keys (normalized):", Object.keys(pdfMap));
+
+    // 5) Generate batch_id for this upload
+    const batch_id = `ELR-${Date.now()}`;
 
     // 6) Build docs: one per asset
     const docs = [];
 
     for (let index = 0; index < marketRows.length; index++) {
       const assetRow = marketRows[index];
-      const assetName = assetRow.asset_name;
-      if (!assetName) continue; // skip row if no asset_name
+      const rawAssetName = assetRow.asset_name;
+      if (!rawAssetName) continue; // skip row if no asset_name
 
+      // Normalize asset_name once (like trimmedCode in your other controller)
+      const assetName = normalizeKey(rawAssetName);
       const asset_id = assetRow.id || index + 1;
 
       // value from market.final_value
@@ -313,22 +347,28 @@ exports.processElrajhiExcel = async (req, res) => {
       if (Math.abs(roundedTotal - 100) > 0.001) {
         return res.status(400).json({
           status: "failed",
-          error: `Asset "${assetName}" (row ${
-            index + 1
-          }) has total valuers percentage = ${roundedTotal}%. It must be exactly 100%.`,
+          error: `Asset "${assetName}" (row ${index + 1
+            }) has total valuers percentage = ${roundedTotal}%. It must be exactly 100%.`,
         });
       }
 
       // ---- PDF resolution ----
-      const assetKey = normalizeKey(assetName);
+      const assetKey = assetName; // already normalized
       let pdf_path = pdfMap[assetKey] || null;
 
       if (!pdf_path) {
-        pdf_path = ensureTempPdf(batchId, asset_id);
+        console.warn(
+          "No PDF found for asset:",
+          assetName,
+          "using dummy-placeholder.pdf"
+        );
+        pdf_path = getPlaceholderPdfPath();
       }
 
+
       docs.push({
-        batchId,
+        batch_id,
+        number_of_macros: 1,
 
         // Report-level (from Report Info)
         title: report.title,
@@ -351,9 +391,9 @@ exports.processElrajhiExcel = async (req, res) => {
         city,
 
         // Per-asset overrides
-        value,
+        final_value: value,
         asset_id,
-        asset_name: assetName,
+        asset_name: assetName, // store normalized name
         asset_usage,
 
         // Keep full market row
@@ -374,18 +414,18 @@ exports.processElrajhiExcel = async (req, res) => {
     }
 
     // 7) Insert into DB
-    const created = await ElrajhiReport.insertMany(docs);
+    const created = await UrgentReport.insertMany(docs);
 
     console.log("====================================");
     console.log("📦 ELRAJHI BATCH IMPORT SUCCESS");
-    console.log("BatchId:", batchId);
+    console.log("batch_id:", batch_id);
     console.log("Inserted reports:", created.length);
     console.log("====================================");
 
     // 8) Response: send the batch of reports
     return res.json({
       status: "success",
-      batchId,
+      batchId: batch_id,
       created: created.length,
       reports: created,
     });

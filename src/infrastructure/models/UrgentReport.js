@@ -16,6 +16,13 @@ const urgentSchema = new mongoose.Schema({
   special_assumptions: Number,
   telephone: String,
   email: String,
+  valuers: [
+    {
+      valuerId: String,
+      valuerName: String,
+      percentage: Number
+    }
+  ],
 
   // OVERRIDE value = final_value from market
   final_value: Number,
