@@ -1,6 +1,6 @@
 const Report = require("../../../infrastructure/models/report");
 
-const createReportUC = async (report_id, reportData) => {
+const createReportUC = async (report_id, reportData, userContext = {}) => {
     try {
         // Check if report already exists
         console.log("report_id", report_id, "reportData", reportData);
@@ -12,7 +12,10 @@ const createReportUC = async (report_id, reportData) => {
         // Filter and prepare the data
         const filteredData = {
             report_id: report_id,
-            startSubmitTime: new Date()
+            startSubmitTime: new Date(),
+            user_id: userContext?.id,
+            user_phone: userContext?.phone,
+            company: userContext?.company || null
         };
 
         // If reportData is an array, treat it as asset_data

@@ -2,6 +2,9 @@ const e = require('express');
 const mongoose = require('mongoose');
 
 const urgentSchema = new mongoose.Schema({
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  user_phone: { type: String },
+  company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },
   title: String,
   batch_id: String,
   client_name: String,
@@ -37,7 +40,7 @@ const urgentSchema = new mongoose.Schema({
 
   // PDF
   pdf_path: String
-});
+}, { timestamps: true });
 const UrgentReport = mongoose.model('UrgentReport', urgentSchema);
 
 

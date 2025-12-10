@@ -17,6 +17,9 @@ const ElrajhiReportSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    user_phone: { type: String },
+    company: { type: mongoose.Schema.Types.ObjectId, ref: "Company", default: null },
 
     // Report Info (flattened, per report/asset)
     title: { type: String },

@@ -230,6 +230,8 @@ exports.processElrajhiExcel = async (req, res) => {
       });
     }
 
+    const userContext = req.user || {};
+
     const excelFile = req.files.excel[0].path;
     const pdfFiles = req.files.pdfs || [];
 
@@ -391,6 +393,9 @@ exports.processElrajhiExcel = async (req, res) => {
       docs.push({
         batch_id,
         number_of_macros: 1,
+        user_id: userContext.id,
+        user_phone: userContext.phone,
+        company: userContext.company || null,
 
         // Report-level (from Report Info)
         title: report.title,

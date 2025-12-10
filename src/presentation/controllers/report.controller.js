@@ -7,7 +7,7 @@ const reportController = {
     async createReport(req, res) {
         try {
             const { reportId, reportData } = req.body;
-            const { success, message, data } = await createReportUC(reportId, reportData);
+            const { success, message, data } = await createReportUC(reportId, reportData, req.user);
 
             if (success) {
                 res.status(200).json({ success, message, data });
