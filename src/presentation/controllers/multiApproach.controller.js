@@ -15,49 +15,103 @@ function normalizeKey(str) {
     .trim();
 }
 
+// Robust Excel date parser (handles Date, Excel serial, xlsx cell objects, and common strings)
 function parseExcelDate(value) {
-  if (!value) return null;
+  if (value === null || value === undefined || value === "") return null;
 
-  if (value instanceof Date) return value;
+  // Already a proper Date
+  if (value instanceof Date && !isNaN(value)) return value;
 
-  if (typeof value === "number") {
-    const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // 1899-12-30
-    const msPerDay = 24 * 60 * 60 * 1000;
-    return new Date(excelEpoch.getTime() + value * msPerDay);
+  // xlsx sometimes returns an object like { t: 'd', v: Date } or { v: serial, t: 'n' }
+  if (typeof value === "object") {
+    if (value.v !== undefined) {
+      return parseExcelDate(value.v);
+    }
+    // if it's an object-wrapped Date
+    if (value instanceof Date && !isNaN(value)) return value;
   }
 
+  // Excel serial number (number of days since 1899-12-31, with 1900 leap-year bug)
+  if (typeof value === "number") {
+    const msPerDay = 24 * 60 * 60 * 1000;
+    // Use 1899-12-30 as base and subtract 1 day for serials > 59 to account for Excel's 1900 leap-year bug
+    const excelEpoch = Date.UTC(1899, 11, 30);
+    const serial = value;
+    const offsetSerial = serial > 59 ? serial - 1 : serial;
+    const dt = new Date(excelEpoch + offsetSerial * msPerDay);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  // Strings: try common formats
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!trimmed) return null;
 
-    if (/^\d+$/.test(trimmed)) {
-      const serial = parseInt(trimmed, 10);
-      const excelEpoch = new Date(Date.UTC(1899, 11, 30));
-      const msPerDay = 24 * 60 * 60 * 1000;
-      return new Date(excelEpoch.getTime() + serial * msPerDay);
+    // ISO-like yyyy-mm-dd or yyyy/mm/dd
+    const iso = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/.exec(trimmed);
+    if (iso) {
+      const y = parseInt(iso[1], 10);
+      const m = parseInt(iso[2], 10);
+      const d = parseInt(iso[3], 10);
+      const dt = new Date(y, m - 1, d);
+      return isNaN(dt.getTime()) ? null : dt;
     }
 
-    const parts = trimmed.split(/[\/\-]/).map((p) => p.trim());
-    if (parts.length !== 3) return null;
+    // d/m/yyyy or m/d/yyyy (common slash or dash separated)
+    const dmy = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(trimmed);
+    if (dmy) {
+      const p1 = parseInt(dmy[1], 10);
+      const p2 = parseInt(dmy[2], 10);
+      const y = parseInt(dmy[3], 10);
 
-    const [d, m, y] = parts.map((p) => parseInt(p, 10));
-    if (!d || !m || !y) return null;
+      // Heuristic: if first part > 12 treat it as day (DD/MM/YYYY). Otherwise assume day/month ordering
+      // (this matches many locales where "09/09/2025" => day=9, month=9)
+      let day = p1;
+      let month = p2;
+      if (p1 > 12 && p2 <= 12) {
+        day = p1;
+        month = p2;
+      } else if (p2 > 12 && p1 <= 12) {
+        // if second part > 12, swap (very rare)
+        day = p2;
+        month = p1;
+      } else {
+        // ambiguous: prefer DD/MM/YYYY (common outside US)
+        day = p1;
+        month = p2;
+      }
+      const dt = new Date(y, month - 1, day);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
 
-    return new Date(y, m - 1, d);
+    // Last resort: let Date.parse try (handles "Sep 9 2025", etc.)
+    const parsed = Date.parse(trimmed);
+    return isNaN(parsed) ? null : new Date(parsed);
   }
 
   return null;
 }
 
-// Format JS Date -> "yyyy-mm-dd" string (or "" if null/invalid)
+// Format JS Date -> "yyyy-mm-dd" string (returns "" for null/invalid)
 function formatDateYyyyMmDd(value) {
-  if (!value) return "";
-  if (!(value instanceof Date)) return value; // assume already formatted string
-  const yyyy = value.getFullYear();
-  const mm = String(value.getMonth() + 1).padStart(2, "0");
-  const dd = String(value.getDate()).padStart(2, "0");
+  if (!value && value !== 0) return "";
+  // If already a Date instance
+  let dt = null;
+  if (value instanceof Date) {
+    dt = value;
+  } else {
+    // Try to parse (handles numbers, strings, and xlsx cell objects)
+    dt = parseExcelDate(value);
+  }
+
+  if (!dt || isNaN(dt.getTime())) return "";
+
+  const yyyy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
+
 
 // Try to read total report value from Report Info row
 function getReportTotalValue(reportRow) {
