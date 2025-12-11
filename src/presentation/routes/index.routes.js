@@ -8,6 +8,7 @@ const companyRoutes = require('./company.routes');
 const uploadRoute = require("../routes/upload.route");
 const elrajhiUploadRoute = require("../routes/elrajhiUpload.route");
 const duplicateReportRoutes = require("./duplicateReport.routes");
+const multiApproachRoutes = require("./multiApproach.routes");
 
 
 
@@ -23,6 +24,7 @@ router.use("/upload", uploadRoute);
 router.use("/upload", uploadRoute);
 router.use("/elrajhi-upload", elrajhiUploadRoute);
 router.use("/duplicate-report", duplicateReportRoutes);
+router.use("/multi-approach", multiApproachRoutes);
 
 router.get('/health', (req, res) => res.json({ ok: true }));
 
