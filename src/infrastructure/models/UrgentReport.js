@@ -5,6 +5,8 @@ const urgentSchema = new mongoose.Schema({
   user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   user_phone: { type: String },
   company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },
+  report_id: { type: String },
+  source_excel_name: { type: String },
   title: String,
   batch_id: String,
   client_name: String,

@@ -5,6 +5,7 @@ const router = express.Router();
 const upload = require("../../utils/upload.multer");
 const {
   processElrajhiExcel,
+  exportElrajhiBatch,
 } = require("../controllers/elrajhiUpload.controller");
 const authMiddleware = require("../../application/middleware/authMiddleware");
 
@@ -21,6 +22,12 @@ router.post(
     { name: "pdfs", maxCount: 5000 },
   ]),
   processElrajhiExcel
+);
+
+router.get(
+  "/export/:batchId",
+  authMiddleware,
+  exportElrajhiBatch
 );
 
 module.exports = router;

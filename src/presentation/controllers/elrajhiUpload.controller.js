@@ -231,8 +231,23 @@ exports.processElrajhiExcel = async (req, res) => {
     }
 
     const userContext = req.user || {};
+    const userPhone =
+      userContext.phone ||
+      userContext.phoneNumber ||
+      userContext.mobile ||
+      userContext.username ||
+      "";
+    const userId = userContext.id || userContext._id || null;
+
+    if (!userPhone) {
+      return res.status(400).json({
+        status: "failed",
+        error: "User phone is required to submit reports.",
+      });
+    }
 
     const excelFile = req.files.excel[0].path;
+    const sourceExcelName = req.files.excel[0].originalname || "elrajhi.xlsx";
     const pdfFiles = req.files.pdfs || [];
 
     // 1) Read Excel
@@ -392,9 +407,10 @@ exports.processElrajhiExcel = async (req, res) => {
 
       docs.push({
         batch_id,
+        source_excel_name: sourceExcelName,
         number_of_macros: 1,
-        user_id: userContext.id,
-        user_phone: userContext.phone,
+        user_id: userId,
+        user_phone: userPhone,
         company: userContext.company || null,
 
         // Report-level (from Report Info)
@@ -442,6 +458,11 @@ exports.processElrajhiExcel = async (req, res) => {
 
     // 7) Insert into DB
     const created = await UrgentReport.insertMany(docs);
+    // Ensure all inserted docs carry the user phone (in case of missing values)
+    await UrgentReport.updateMany(
+      { batch_id },
+      { $set: { user_phone: userPhone, user_id: userId } }
+    );
 
     console.log("====================================");
     console.log("📦 ELRAJHI BATCH IMPORT SUCCESS");
@@ -454,6 +475,8 @@ exports.processElrajhiExcel = async (req, res) => {
       status: "success",
       batchId: batch_id,
       created: created.length,
+      excelName: sourceExcelName,
+      downloadPath: `/api/elrajhi-upload/export/${batch_id}`,
       reports: created,
     });
   } catch (err) {
@@ -461,6 +484,65 @@ exports.processElrajhiExcel = async (req, res) => {
     return res.status(500).json({
       status: "failed",
       error: err.message,
+    });
+  }
+};
+
+// Export a simple Excel with asset, client, and report IDs (no PDF path)
+exports.exportElrajhiBatch = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    if (!batchId) {
+      return res.status(400).json({
+        status: "failed",
+        error: "batchId is required",
+      });
+    }
+
+    const reports = await UrgentReport.find({ batch_id: batchId })
+      .sort({ asset_id: 1, createdAt: 1 })
+      .lean();
+
+    if (!reports.length) {
+      return res.status(404).json({
+        status: "failed",
+        error: "No reports found for this batch.",
+      });
+    }
+
+    const baseName = reports[0].source_excel_name || `${batchId}.xlsx`;
+    const parsed = path.parse(baseName);
+    const fileName = `${parsed.name} updated${parsed.ext || ".xlsx"}`;
+
+    const header = ["#", "Asset Name", "Client Name", "Report ID"];
+    const rows = reports.map((r, idx) => ([
+      idx + 1,
+      r.asset_name || "",
+      r.client_name || "",
+      r.report_id || "",
+    ]));
+
+    const ws = xlsx.utils.aoa_to_sheet([header, ...rows]);
+    const wb = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(wb, ws, "Reports");
+
+    const buffer = xlsx.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}"`
+    );
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+
+    return res.send(buffer);
+  } catch (err) {
+    console.error("Export Elrajhi batch error:", err);
+    return res.status(500).json({
+      status: "failed",
+      error: "Failed to generate export",
     });
   }
 };
