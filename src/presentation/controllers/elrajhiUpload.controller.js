@@ -546,3 +546,84 @@ exports.exportElrajhiBatch = async (req, res) => {
     });
   }
 };
+
+// List batches with counts to power the checker tab
+exports.listElrajhiBatches = async (req, res) => {
+  try {
+    const batches = await UrgentReport.aggregate([
+      {
+        $group: {
+          _id: "$batch_id",
+          totalReports: { $sum: 1 },
+          withReportId: {
+            $sum: {
+              $cond: [{ $ifNull: ["$report_id", false] }, 1, 0],
+            },
+          },
+          completedReports: {
+            $sum: { $cond: [{ $eq: ["$submit_state", 1] }, 1, 0] },
+          },
+          lastCreatedAt: { $max: "$createdAt" },
+          excelName: { $first: "$source_excel_name" },
+        },
+      },
+      { $sort: { lastCreatedAt: -1 } },
+    ]);
+
+    return res.json({
+      status: "success",
+      batches: batches.map((b) => ({
+        batchId: b._id,
+        totalReports: b.totalReports,
+        withReportId: b.withReportId,
+        completedReports: b.completedReports,
+        excelName: b.excelName || "",
+        lastCreatedAt: b.lastCreatedAt,
+      })),
+    });
+  } catch (err) {
+    console.error("List Elrajhi batches error:", err);
+    return res.status(500).json({
+      status: "failed",
+      error: err.message || "Failed to list batches",
+    });
+  }
+};
+
+// Fetch reports inside a batch (used for expand view)
+exports.getElrajhiBatchReports = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    if (!batchId) {
+      return res.status(400).json({
+        status: "failed",
+        error: "batchId is required",
+      });
+    }
+
+    const reports = await UrgentReport.find({ batch_id: batchId })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    return res.json({
+      status: "success",
+      batchId,
+      reports: reports.map((r) => ({
+        id: r._id,
+        batch_id: r.batch_id,
+        report_id: r.report_id || "",
+        client_name: r.client_name || "",
+        asset_name: r.asset_name || "",
+        submit_state: typeof r.submit_state === "number" ? r.submit_state : 0,
+        pdf_path: r.pdf_path || "",
+        last_checked_at: r.last_checked_at,
+      })),
+    });
+  } catch (err) {
+    console.error("Get Elrajhi batch reports error:", err);
+    return res.status(500).json({
+      status: "failed",
+      error: err.message || "Failed to fetch batch reports",
+    });
+  }
+};

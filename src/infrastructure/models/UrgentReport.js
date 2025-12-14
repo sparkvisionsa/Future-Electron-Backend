@@ -41,7 +41,11 @@ const urgentSchema = new mongoose.Schema({
   asset_usage: String,
 
   // PDF
-  pdf_path: String
+  pdf_path: String,
+
+  // Submission tracking
+  submit_state: { type: Number, default: 0 }, // 0 = incomplete/not checked, 1 = complete
+  last_checked_at: { type: Date }
 }, { timestamps: true });
 const UrgentReport = mongoose.model('UrgentReport', urgentSchema);
 

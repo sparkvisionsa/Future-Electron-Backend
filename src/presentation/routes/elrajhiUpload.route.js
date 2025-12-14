@@ -6,6 +6,8 @@ const upload = require("../../utils/upload.multer");
 const {
   processElrajhiExcel,
   exportElrajhiBatch,
+  listElrajhiBatches,
+  getElrajhiBatchReports,
 } = require("../controllers/elrajhiUpload.controller");
 const authMiddleware = require("../../application/middleware/authMiddleware");
 
@@ -28,6 +30,18 @@ router.get(
   "/export/:batchId",
   authMiddleware,
   exportElrajhiBatch
+);
+
+router.get(
+  "/batches",
+  authMiddleware,
+  listElrajhiBatches
+);
+
+router.get(
+  "/batches/:batchId/reports",
+  authMiddleware,
+  getElrajhiBatchReports
 );
 
 module.exports = router;
