@@ -4,7 +4,6 @@ const authMiddleware = require('../../application/middleware/authMiddleware')
 
 const router = express.Router();
 
-router.use(authMiddleware);
 
 router.get('/reportExistenceCheck/:reportId', reportController.reportExistenceCheck);
 router.get('/checkMissingPages/:reportId', reportController.checkMissingPages);
