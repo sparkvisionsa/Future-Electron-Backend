@@ -14,7 +14,6 @@ const {
 // Require authentication so processElrajhiExcel receives req.user (phone, id, etc.)
 router.post(
   "/",
-  authMiddleware,
   (req, res, next) => {
     console.log("📥 API HIT: POST /api/elrajhi-upload");
     next();
