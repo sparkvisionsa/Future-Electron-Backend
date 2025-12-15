@@ -1,6 +1,7 @@
 // src/presentation/routes/elrajhiUpload.route.js
 const express = require("express");
 const router = express.Router();
+const authMiddleware = require("../../application/middleware/authMiddleware");
 
 const upload = require("../../utils/upload.multer");
 const {
@@ -10,8 +11,10 @@ const {
   getElrajhiBatchReports,
 } = require("../controllers/elrajhiUpload.controller");
 
+// Require authentication so processElrajhiExcel receives req.user (phone, id, etc.)
 router.post(
   "/",
+  authMiddleware,
   (req, res, next) => {
     console.log("📥 API HIT: POST /api/elrajhi-upload");
     next();
