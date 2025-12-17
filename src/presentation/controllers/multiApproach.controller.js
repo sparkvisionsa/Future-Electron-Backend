@@ -6,6 +6,12 @@ const MultiApproachReport = require("../../infrastructure/models/MultiApproachRe
 
 // ------------ helpers ------------
 
+function badRequest(message) {
+  const err = new Error(message);
+  err.statusCode = 400;
+  return err;
+}
+
 function normalizeKey(str) {
   if (!str) return "";
   return str
@@ -152,7 +158,7 @@ exports.processMultiApproachBatch = async (req, res) => {
         excelMap.set(baseName, { file, pdfs: [] });
       } else {
         // multiple Excel with same basename – adjust as you like
-        throw new Error(
+        throw badRequest(
           `Duplicate Excel base name detected: "${baseName}". Please ensure unique Excel file names.`
         );
       }
@@ -203,7 +209,14 @@ exports.processMultiApproachBatch = async (req, res) => {
     // 3) Process each Excel file
     for (const [baseName, { file, pdfs }] of excelMap.entries()) {
       const excelPath = file.path;
-      const workbook = xlsx.readFile(excelPath);
+      let workbook;
+      try {
+        workbook = xlsx.readFile(excelPath);
+      } catch (readErr) {
+        throw badRequest(
+          `Excel "${file.originalname}" could not be read. Please confirm it is a valid .xlsx/.xls file.`
+        );
+      }
 
       const reportSheet = workbook.Sheets["Report Info"];
       const marketSheet = workbook.Sheets["market"];
@@ -292,11 +305,10 @@ exports.processMultiApproachBatch = async (req, res) => {
         const assetName = row.asset_name || row["asset_name\n"];
         if (!assetName) return;
         const asset_usage_id = row.asset_usage_id || null;
-        console.log(asset_usage_id);
 
         if (!asset_usage_id) {
-          throw new Error(
-            `Asset "${row.asset_name}" missing asset usaage id`
+          throw badRequest(
+            `Asset "${assetName}" missing asset usage id (asset_usage_id) in market sheet.`
           );
         }
 
@@ -337,11 +349,10 @@ exports.processMultiApproachBatch = async (req, res) => {
         if (!assetName) return;
 
         const asset_usage_id = row.asset_usage_id || null;
-        console.log(asset_usage_id);
 
         if (!asset_usage_id) {
-          throw new Error(
-            `Asset "${row.asset_name}" missing asset usaage id`
+          throw badRequest(
+            `Asset "${assetName}" missing asset usage id (asset_usage_id) in cost sheet.`
           );
         }
 
@@ -356,7 +367,7 @@ exports.processMultiApproachBatch = async (req, res) => {
 
         // 2) Ensure it's not empty
         if (final_value_raw === "" || final_value_raw === null) {
-          throw new Error(
+          throw badRequest(
             `Asset "${row.asset_name}" has no final_value. It must be an integer.`
           );
         }
@@ -366,21 +377,21 @@ exports.processMultiApproachBatch = async (req, res) => {
 
         // 4) Must be a number
         if (isNaN(final_value_num)) {
-          throw new Error(
+          throw badRequest(
             `Asset "${row.asset_name}" has invalid final_value "${final_value_raw}". Must be an integer number.`
           );
         }
 
         // 5) Must be integer (no decimals allowed)
         if (!Number.isInteger(final_value_num)) {
-          throw new Error(
+          throw badRequest(
             `Asset "${row.asset_name}" has decimal final_value "${final_value_raw}". Only integer values are allowed.`
           );
         }
 
         // 6) Must be non-negative
         if (final_value_num < 0) {
-          throw new Error(
+          throw badRequest(
             `Asset "${row.asset_name}" has negative final_value "${final_value_raw}". Not allowed.`
           );
         }
@@ -495,9 +506,10 @@ exports.processMultiApproachBatch = async (req, res) => {
     });
   } catch (err) {
     console.error("Multi-approach batch upload error:", err);
-    return res.status(500).json({
+    const statusCode = err?.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
+    return res.status(statusCode).json({
       status: "failed",
-      error: err.message,
+      error: err?.message || "Unexpected error",
     });
   }
 };
