@@ -9,7 +9,7 @@ const {
   exportElrajhiBatch,
   listElrajhiBatches,
   getElrajhiBatchReports,
-  getReportById
+  updateUrgentReport,
 } = require("../controllers/elrajhiUpload.controller");
 
 // Require authentication so processElrajhiExcel receives req.user (phone, id, etc.)
@@ -42,9 +42,9 @@ router.get(
   getElrajhiBatchReports
 );
 
-router.get(
-  "/reports/:reportId",
-  getReportById
+router.put(
+  "/reports/:id",
+  updateUrgentReport
 );
 
 module.exports = router;

@@ -639,6 +639,8 @@ exports.getElrajhiBatchReports = async (req, res) => {
       return report.submit_state === 1 ? "COMPLETE" : "INCOMPLETE";
     };
 
+    console.log("REPORTS:", reports);
+
     return res.json({
       status: "success",
       batchId,
@@ -646,6 +648,8 @@ exports.getElrajhiBatchReports = async (req, res) => {
         const reportStatus = normalizeStatus(r);
         return {
           id: r._id,
+          asset_name: r.asset_name || "",
+          asset_usage: r.asset_usage || "",
           batch_id: r.batch_id,
           title: r.title || "",
           value_premise_id: r.value_premise_id || 0,
@@ -679,35 +683,171 @@ exports.getElrajhiBatchReports = async (req, res) => {
   }
 };
 
-exports.getReportById = async (req, res) => {
+exports.updateUrgentReport = async (req, res) => {
   try {
-    const { reportId } = req.params;
-    if (!reportId) {
+    const { id } = req.params;
+
+    if (!id) {
       return res.status(400).json({
         status: "failed",
-        error: "reportId is required",
+        error: "id is required",
       });
     }
 
-    const report = await UrgentReport.findOne({ report_id: reportId })
-      .lean();
+    const { updatedData } = req.body;
 
-    if (!report) {
+    if (!updatedData || typeof updatedData !== "object") {
+      return res.status(400).json({
+        status: "failed",
+        error: "updatedData is required",
+      });
+    }
+
+    // 1. Fetch existing report
+    const existingReport = await UrgentReport.findById(id).lean();
+
+    if (!existingReport) {
       return res.status(404).json({
         status: "failed",
         error: "Report not found",
       });
     }
 
+    /**
+     * =====================================================
+     * 2. Editable fields
+     * =====================================================
+     */
+    const EDITABLE_FIELDS = [
+      // report fields
+      "title",
+      "purpose_id",
+      "value_premise_id",
+      "report_type",
+      "valued_at",
+      "submitted_at",
+      "inspection_date",
+      "final_value",
+      "telephone",
+      "email",
+
+      // shared
+      "client_name",
+
+      // asset fields
+      "asset_name",
+      "asset_usage",
+    ];
+
+    /**
+     * =====================================================
+     * 3. Normalization helper
+     * =====================================================
+     */
+    const normalizeValue = (key, value) => {
+      if (value === undefined || value === null) return null;
+
+      if (["valued_at", "submitted_at", "inspection_date"].includes(key)) {
+        const d = new Date(value);
+        return isNaN(d.getTime())
+          ? null
+          : d.toISOString().split("T")[0];
+      }
+
+      if (
+        ["purpose_id", "value_premise_id", "final_value"].includes(key)
+      ) {
+        const n = Number(value);
+        return isNaN(n) ? null : n;
+      }
+
+      return String(value).trim();
+    };
+
+    /**
+     * =====================================================
+     * 4. Detect meaningful changes
+     * =====================================================
+     */
+    let hasChanges = false;
+    const diffs = [];
+
+    for (const key of EDITABLE_FIELDS) {
+      if (!(key in updatedData)) continue;
+
+      const oldNorm = normalizeValue(key, existingReport[key]);
+      const newNorm = normalizeValue(key, updatedData[key]);
+
+      if (oldNorm !== newNorm) {
+        hasChanges = true;
+        diffs.push({
+          field: key,
+          before: oldNorm,
+          after: newNorm,
+        });
+      }
+    }
+
+    // No meaningful changes → exit
+    if (!hasChanges) {
+      return res.json({
+        status: "success",
+        message: "No changes detected",
+        report: existingReport,
+      });
+    }
+
+    /**
+     * =====================================================
+     * 5. Build update payload
+     * =====================================================
+     */
+    const updatePayload = {};
+
+    for (const key of EDITABLE_FIELDS) {
+      if (!(key in updatedData)) continue;
+
+      let val = normalizeValue(key, updatedData[key]);
+
+      if (["valued_at", "submitted_at", "inspection_date"].includes(key)) {
+        val = val ? new Date(val) : null;
+      }
+
+      updatePayload[key] = val;
+    }
+
+    if (existingReport.report_id) {
+      updatePayload.report_status = "EDITED";
+    }
+    else {
+      updatePayload.report_status = "INCOMPLETE";
+    }
+
+    /**
+     * =====================================================
+     * 7. Apply update
+     * =====================================================
+     */
+    const updatedReport = await UrgentReport.findByIdAndUpdate(
+      id,
+      { $set: updatePayload },
+      { new: true }
+    );
+
     return res.json({
       status: "success",
-      report,
+      report: updatedReport,
+      diffs,
     });
   } catch (err) {
-    console.error("Get report by ID error:", err);
+    console.error("[UPDATE] Fatal error:", err);
     return res.status(500).json({
       status: "failed",
-      error: err.message || "Failed to fetch report",
+      error: err.message || "Failed to update report",
     });
   }
 };
+
+
+
+
