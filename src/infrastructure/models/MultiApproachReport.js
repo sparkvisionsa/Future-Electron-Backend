@@ -11,15 +11,15 @@ const ValuerSchema = new mongoose.Schema(
 const AssetSchema = new mongoose.Schema(
   {
     asset_id: { type: Number },
-    asset_name: { type: String ,required: true },
-    asset_usage_id: { type: Number , required: true },
+    asset_name: { type: String, required: true },
+    asset_usage_id: { type: Number, required: true },
     asset_type: { type: String, default: "0" },
 
     // Repeated high-level fields (copied from parent report)
     region: { type: String },
     city: { type: String },
     inspection_date: { type: String }, // yyyy-mm-dd
-    owner_name: { type: String ,required: true},
+    owner_name: { type: String, required: true },
 
     source_sheet: {
       type: String,
@@ -66,40 +66,40 @@ const MultiApproachReportSchema = new mongoose.Schema(
     title: { type: String },
 
     client_name: {
-    type: String,
-    required: [true, "Client name is required"],
-    trim: true,
-    minlength: [9, "Client name must be at least 9 characters long"],
-},
+      type: String,
+      required: [true, "Client name is required"],
+      trim: true,
+      minlength: [9, "Client name must be at least 9 characters long"],
+    },
 
 
     owner_name: { type: String },
     purpose_id: { type: Number, required: true },
-    value_premise_id: { type: Number , required: true },
-    report_type: { type: String , required: true },
+    value_premise_id: { type: Number, required: true },
+    report_type: { type: String, required: true },
 
     // Store as yyyy-mm-dd string (not Date)
-    valued_at: { type: String , required: true }, // yyyy-mm-dd
-    submitted_at: { type: String , required: true }, // yyyy-mm-dd
-    inspection_date: { type: String , required: true }, // yyyy-mm-dd
+    valued_at: { type: String, required: true }, // yyyy-mm-dd
+    submitted_at: { type: String, required: true }, // yyyy-mm-dd
+    inspection_date: { type: String, required: true }, // yyyy-mm-dd
 
     assumptions: { type: String },
     special_assumptions: { type: String },
 
-   telephone: {
-  type: String,
-  required: [true, "Telephone number is required"],
-  trim: true,
-  validate: {
-    validator: function (v) {
-      // remove everything except digits
-      const digitsOnly = v.replace(/\D/g, "");
-      return digitsOnly.length >= 9;
+    telephone: {
+      type: String,
+      required: [true, "Telephone number is required"],
+      trim: true,
+      validate: {
+        validator: function (v) {
+          // remove everything except digits
+          const digitsOnly = v.replace(/\D/g, "");
+          return digitsOnly.length >= 8;
+        },
+        message: "Telephone number must contain at least 8 digits",
+      },
     },
-    message: "Telephone number must contain at least 9 digits",
-  },
-},
-    email: { 
+    email: {
       type: String,
       required: [true, "Email address is required"],
       trim: true,
