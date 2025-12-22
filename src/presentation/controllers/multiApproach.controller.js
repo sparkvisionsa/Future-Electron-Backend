@@ -1,6 +1,8 @@
 const xlsx = require("xlsx");
 const path = require("path");
 const fs = require("fs");
+const dummyPdfPath = path.resolve("uploads/static/dummy_placeholder.pdf");
+
 
 const MultiApproachReport = require("../../infrastructure/models/MultiApproachReport");
 
@@ -114,7 +116,7 @@ function formatDateYyyyMmDd(value) {
 
   const yyyy = dt.getFullYear();
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
-  const dd = String(dt.getDate()).padStart(2, "0");
+  const dd = String(dt.getDate() + 1).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
 
@@ -236,6 +238,14 @@ exports.processMultiApproachBatch = async (req, res) => {
       });
     }
 
+
+    excelMap.forEach((value, baseName) => {
+  if (value.pdfs.length === 0) {
+    value.pdfs.push(dummyPdfPath);
+  }
+});
+
+
     // Also ensure every Excel has at least one PDF (if that's required)
     const excelsWithoutPdf = [];
     for (const [baseName, value] of excelMap.entries()) {
@@ -304,6 +314,7 @@ exports.processMultiApproachBatch = async (req, res) => {
 
       const owner_name =
         report.owner_name ||
+        report.client_name ||
         report["owner_name\n"] ||
         report["Owner Name"] ||
         "";
@@ -493,12 +504,12 @@ exports.processMultiApproachBatch = async (req, res) => {
         });
       }
 
-      // If you want exactly one PDF per Excel, uncomment this:
-      // if (pdfs.length !== 1) {
-      //   throw new Error(
-      //     `Excel "${file.originalname}" must have exactly one matching PDF, but found ${pdfs.length}.`
-      //   );
-      // }
+      // If you want exactly one PDF per Excels:
+      if (pdfs.length !== 1) {
+        throw new Error(
+          `Excel "${file.originalname}" must have exactly one matching PDF, but found ${pdfs.length}.`
+        );
+      }
 
       // 3.4 Build document for this Excel
       docsToInsert.push({
@@ -769,11 +780,25 @@ exports.createManualMultiApproachReport = async (req, res) => {
       reports: [created],
     });
   } catch (err) {
-    console.error("Manual multi-approach creation failed:", err);
-    const statusCode = err?.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
-    return res.status(statusCode).json({
+  console.error("Multi-approach batch upload error:", err);
+
+  if (err.name === "ValidationError") {
+    // Collect all field-specific messages
+    const messages = Object.values(err.errors).map((e) => e.message);
+
+    return res.status(400).json({
       status: "failed",
-      error: err?.message || "Unexpected error",
+      error: messages.join("Date Validation Error: Date of Valuation must be on or before Report Issuing Date"),
     });
   }
+
+  const statusCode =
+    err?.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
+
+  return res.status(statusCode).json({
+    status: "failed",
+    error: err?.message || "Unexpected error",
+  });
+}
+
 };

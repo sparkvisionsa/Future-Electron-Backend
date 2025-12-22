@@ -11,15 +11,15 @@ const ValuerSchema = new mongoose.Schema(
 const AssetSchema = new mongoose.Schema(
   {
     asset_id: { type: Number },
-    asset_name: { type: String },
-    asset_usage_id: { type: Number },
+    asset_name: { type: String ,required: true },
+    asset_usage_id: { type: Number , required: true },
     asset_type: { type: String, default: "0" },
 
     // Repeated high-level fields (copied from parent report)
     region: { type: String },
     city: { type: String },
     inspection_date: { type: String }, // yyyy-mm-dd
-    owner_name: { type: String },
+    owner_name: { type: String ,required: true},
 
     source_sheet: {
       type: String,
@@ -64,22 +64,46 @@ const MultiApproachReportSchema = new mongoose.Schema(
 
     // Report Info (flattened important fields)
     title: { type: String },
-    client_name: { type: String },
+
+    client_name: {
+    type: String,
+    required: [true, "Client name is required"],
+    trim: true,
+    minlength: [9, "Client name must be at least 9 characters long"],
+},
+
+
     owner_name: { type: String },
-    purpose_id: { type: Number },
-    value_premise_id: { type: Number },
-    report_type: { type: String },
+    purpose_id: { type: Number, required: true },
+    value_premise_id: { type: Number , required: true },
+    report_type: { type: String , required: true },
 
     // Store as yyyy-mm-dd string (not Date)
-    valued_at: { type: String },
-    submitted_at: { type: String },
-    inspection_date: { type: String }, // yyyy-mm-dd
+    valued_at: { type: String , required: true }, // yyyy-mm-dd
+    submitted_at: { type: String , required: true }, // yyyy-mm-dd
+    inspection_date: { type: String , required: true }, // yyyy-mm-dd
 
     assumptions: { type: String },
     special_assumptions: { type: String },
 
-    telephone: { type: String },
-    email: { type: String },
+   telephone: {
+  type: String,
+  required: [true, "Telephone number is required"],
+  trim: true,
+  validate: {
+    validator: function (v) {
+      // remove everything except digits
+      const digitsOnly = v.replace(/\D/g, "");
+      return digitsOnly.length >= 9;
+    },
+    message: "Telephone number must contain at least 9 digits",
+  },
+},
+    email: { 
+      type: String,
+      required: [true, "Email address is required"],
+      trim: true,
+    },
 
     region: { type: String },
     city: { type: String },
@@ -120,6 +144,41 @@ const MultiApproachReportSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+
+
+MultiApproachReportSchema.pre("validate", function () {
+  const doc = this;
+
+  if (!doc.valued_at || !doc.submitted_at) {
+    const err = new mongoose.Error.ValidationError(doc);
+    err.addError(
+      "valued_at",
+      new mongoose.Error.ValidatorError({
+        message: "valued_at and submitted_at are required fields",
+        path: "valued_at",
+        value: doc.valued_at,
+      })
+    );
+    throw err;
+  }
+
+  if (doc.valued_at > doc.submitted_at) {
+    const err = new mongoose.Error.ValidationError(doc);
+    err.addError(
+      "valued_at",
+      new mongoose.Error.ValidatorError({
+        message:
+          "Date of Valuation must be on or before Report Issuing Date (submitted_at)",
+        path: "valued_at",
+        value: doc.valued_at,
+      })
+    );
+    throw err;
+  }
+});
+
+
+
 function toYyyyMmDd(value) {
   if (!value) return "";
   if (value instanceof Date) {
@@ -152,6 +211,8 @@ MultiApproachReportSchema.pre("save", function () {
         toYyyyMmDd(doc.inspection_date || asset.inspection_date);
     });
   }
+
+  // next();
 });
 
 module.exports = mongoose.model(
