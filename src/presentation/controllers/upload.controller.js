@@ -4,6 +4,8 @@ const Report = require("../../infrastructure/models/UrgentReport");
 const { title } = require("process");
 const { randomUUID } = require("crypto");   // 👈 add this
 
+const dummyPdfPath = path.resolve("uploads/static/dummy_placeholder.pdf"); // ✅ dummy pdf
+
 
 function normalizeKey(str) {
   if (!str) return "";
@@ -224,7 +226,10 @@ exports.processUpload = async (req, res) => {
       const clientName = `${report.client_name} (${asset_id}) ${trimmedCode}`;
 
       // ✅ PDF mapping using asset_name
-      const pdf_path = trimmedCode ? pdfMap[trimmedCode] || null : null;
+      // If user uploaded PDFs -> use matched pdf
+      // If not uploaded any PDFs -> use dummy pdf
+      const pdf_path = trimmedCode ? (pdfMap[trimmedCode] || dummyPdfPath) : dummyPdfPath;
+
 
       docs.push({
         batch_id,
@@ -253,7 +258,7 @@ exports.processUpload = async (req, res) => {
         asset_usage:
           asset["asset_usage_id\n"]?.toString() || asset.asset_usage_id || "", // ✅ usage id
 
-        pdf_path, // ✅ will be non-null if PDF filename matches asset_name
+        pdf_path, // ✅ dummy if no PDFs uploaded
       });
     }
 
