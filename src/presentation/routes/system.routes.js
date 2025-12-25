@@ -7,5 +7,6 @@ const router = express.Router();
 
 router.get('/state', systemController.getSystemState);
 router.put('/state', authMiddleware, adminOnly, systemController.updateSystemState);
+router.get('/stats', authMiddleware, adminOnly, systemController.getSystemStats);
 
 module.exports = router;

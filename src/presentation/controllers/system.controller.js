@@ -1,6 +1,52 @@
 const SystemState = require('../../infrastructure/models/systemState');
+const User = require('../../infrastructure/models/user');
+const Company = require('../../infrastructure/models/company');
+const PackageModel = require('../../infrastructure/models/package');
+const Subscription = require('../../infrastructure/models/subscription');
+const SystemUpdate = require('../../infrastructure/models/systemUpdate');
+const Report = require('../../infrastructure/models/report');
+const UrgentReport = require('../../infrastructure/models/UrgentReport');
+const DuplicateReport = require('../../infrastructure/models/DuplicateReport');
+const MultiApproachReport = require('../../infrastructure/models/MultiApproachReport');
+const ElrajhiReport = require('../../infrastructure/models/ElrajhiReport');
 
 const VALID_MODES = ['active', 'inactive', 'partial', 'demo'];
+
+const buildLast7Days = () => {
+    const labels = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = 6; i >= 0; i -= 1) {
+        const day = new Date(today);
+        day.setDate(today.getDate() - i);
+        labels.push(day.toISOString().slice(0, 10));
+    }
+    return labels;
+};
+
+const aggregateDailyCounts = async (Model, startDate) => {
+    if (!Model) return {};
+    const rows = await Model.aggregate([
+        { $match: { createdAt: { $gte: startDate } } },
+        {
+            $group: {
+                _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                count: { $sum: 1 }
+            }
+        }
+    ]);
+    return rows.reduce((acc, row) => {
+        acc[row._id] = row.count;
+        return acc;
+    }, {});
+};
+
+const mergeDailyCounts = (target, source) => {
+    Object.entries(source || {}).forEach(([key, value]) => {
+        target[key] = (target[key] || 0) + value;
+    });
+    return target;
+};
 
 exports.getSystemState = async (req, res) => {
     try {
@@ -63,5 +109,124 @@ exports.updateSystemState = async (req, res) => {
         res.json(state);
     } catch (error) {
         res.status(500).json({ message: 'Failed to update system state', error: error.message });
+    }
+};
+
+exports.getSystemStats = async (req, res) => {
+    try {
+        const [
+            userCount,
+            companyCount,
+            packageCount,
+            subscriptionCount,
+            updateCount,
+            reportCount,
+            urgentCount,
+            duplicateCount,
+            multiApproachCount,
+            elrajhiCount
+        ] = await Promise.all([
+            User.countDocuments(),
+            Company.countDocuments(),
+            PackageModel.countDocuments(),
+            Subscription.countDocuments(),
+            SystemUpdate.countDocuments(),
+            Report.countDocuments(),
+            UrgentReport.countDocuments(),
+            DuplicateReport.countDocuments(),
+            MultiApproachReport.countDocuments(),
+            ElrajhiReport.countDocuments()
+        ]);
+
+        const reportTypes = {
+            standard: reportCount,
+            urgent: urgentCount,
+            duplicate: duplicateCount,
+            multiApproach: multiApproachCount,
+            elrajhi: elrajhiCount
+        };
+
+        const totals = {
+            users: userCount,
+            companies: companyCount,
+            packages: packageCount,
+            subscriptions: subscriptionCount,
+            updates: updateCount,
+            reports: Object.values(reportTypes).reduce((sum, value) => sum + value, 0)
+        };
+
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        start.setDate(start.getDate() - 6);
+
+        const [
+            userDaily,
+            standardDaily,
+            urgentDaily,
+            duplicateDaily,
+            multiApproachDaily,
+            elrajhiDaily
+        ] = await Promise.all([
+            aggregateDailyCounts(User, start),
+            aggregateDailyCounts(Report, start),
+            aggregateDailyCounts(UrgentReport, start),
+            aggregateDailyCounts(DuplicateReport, start),
+            aggregateDailyCounts(MultiApproachReport, start),
+            aggregateDailyCounts(ElrajhiReport, start)
+        ]);
+
+        const reportDaily = mergeDailyCounts(
+            mergeDailyCounts(
+                mergeDailyCounts(
+                    mergeDailyCounts(
+                        mergeDailyCounts({}, standardDaily),
+                        urgentDaily
+                    ),
+                    duplicateDaily
+                ),
+                multiApproachDaily
+            ),
+            elrajhiDaily
+        );
+
+        const labels = buildLast7Days();
+        const weekly = {
+            labels,
+            users: labels.map((label) => userDaily[label] || 0),
+            reports: labels.map((label) => reportDaily[label] || 0)
+        };
+
+        const statusRows = await UrgentReport.aggregate([
+            { $group: { _id: '$report_status', count: { $sum: 1 } } }
+        ]);
+        const reportStatus = {
+            incomplete: 0,
+            complete: 0,
+            sent: 0,
+            confirmed: 0
+        };
+        statusRows.forEach((row) => {
+            const key = String(row._id || '').toLowerCase();
+            if (key === 'incomplete') reportStatus.incomplete = row.count;
+            if (key === 'complete') reportStatus.complete = row.count;
+            if (key === 'sent') reportStatus.sent = row.count;
+            if (key === 'confirmed') reportStatus.confirmed = row.count;
+        });
+
+        const recentUpdates = await SystemUpdate.find()
+            .sort({ createdAt: -1 })
+            .limit(4)
+            .select('version updateType status createdAt');
+
+        res.json({
+            generatedAt: new Date().toISOString(),
+            totals,
+            reportTypes,
+            reportStatus,
+            weekly,
+            recentUpdates
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to load system stats', error: error.message });
     }
 };
