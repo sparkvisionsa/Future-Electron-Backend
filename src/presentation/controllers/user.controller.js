@@ -152,40 +152,140 @@ exports.login = async (req, res) => {
 
 
 exports.taqeemBootstrap = async (req, res) => {
-    const { username, password } = req.body;
+    try {
+        const { username, password } = req.body;
 
-    let user = await User.findOne({ "taqeem.username": username });
+        let user = await User.findOne({ "taqeem.username": username });
 
-    // CASE 1: first time ever
-    if (!user) {
-        user = await User.create({
-            taqeem: {
-                username,
-                password,
-                bootstrap_used: false,
-            }
+        // CASE 1 — first time ever → create user + send token  
+        if (!user) {
+            user = await User.create({
+                taqeem: {
+                    username,
+                    password,
+                    bootstrap_used: false,
+                }
+            });
+
+            const payload = {
+                id: user._id.toString(),
+                phone: user.phone || null,
+                type: user.type || "taqeem",
+                role: user.role || "user",
+                company: user.company || null,
+                permissions: user.permissions || []
+            };
+
+            const accessToken = generateAccessToken(payload);
+            const refreshToken = generateRefreshToken(payload);
+
+            res.cookie("refreshToken", refreshToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "Strict",
+                maxAge: 7 * 24 * 60 * 60 * 1000
+            });
+
+            return res.json({
+                status: "BOOTSTRAP_GRANTED",
+                token: accessToken,
+                refreshToken,
+                userId: user._id,
+            });
+        }
+
+        // CASE 2 — username exists but password mismatch → NO token
+        if (user.taqeem.password !== password) {
+            return res.status(401).json({ message: "Invalid credentials" });
+        }
+
+        // CASE 3 — user exists and bootstrap already used → NO token
+        if (user.taqeem.bootstrap_used) {
+            return res.status(403).json({
+                status: "LOGIN_REQUIRED"
+            });
+        }
+
+        // CASE 4 — user exists, password correct, bootstrap not yet used → send token
+        const payload = {
+            id: user._id.toString(),
+            phone: user.phone || null,
+            type: user.type || "taqeem",
+            role: user.role || "user",
+            company: user.company || null,
+            permissions: user.permissions || []
+        };
+
+        const accessToken = generateAccessToken(payload);
+        const refreshToken = generateRefreshToken(payload);
+
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "Strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000
         });
 
         return res.json({
             status: "BOOTSTRAP_GRANTED",
-            userId: user._id,
+            token: accessToken,
+            refreshToken,
+            userId: user._id
         });
-    }
 
-    // CASE 2: username exists but password mismatch
-    if (user.taqeem.password !== password) {
-        return res.status(401).json({ message: "Invalid credentials" });
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: "Server error", error: err.message });
     }
+};
 
-    // CASE 3: user already exists → login required
-    if (user.taqeem.bootstrap_used) {
-        return res.status(403).json({
-            status: "LOGIN_REQUIRED"
+exports.authorizeTaqeem = async (req, res) => {
+    try {
+        const userId = req.userId;
+
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // 1) If user has normal credentials → authorize directly
+        if (user.phone && user.password) {
+            return res.json({
+                status: 'AUTHORIZED',
+                reason: 'NORMAL_ACCOUNT',
+                userId: user._id
+            });
+        }
+
+        // 2) Ensure taqeem profile exists
+        if (!user.taqeem) {
+            return res.status(400).json({
+                status: 'NOT_AUTHORIZED',
+                message: 'Taqeem account not configured'
+            });
+        }
+
+        // 3) Bootstrap flow
+        // If already used → deny authorization
+        if (user.taqeem.bootstrap_used) {
+            return res.status(403).json({
+                status: 'LOGIN_REQUIRED'
+            });
+        }
+
+        // Not used yet → mark as used and authorize
+        user.taqeem.bootstrap_used = true;
+        await user.save();
+
+        return res.json({
+            status: 'AUTHORIZED',
+            reason: 'BOOTSTRAP_ACTIVATED',
+            userId: user._id
         });
-    }
 
-    return res.json({
-        status: "BOOTSTRAP_GRANTED",
-        userId: user._id,
-    });
-}
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Server error', error: err.message });
+    }
+};
