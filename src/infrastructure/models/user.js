@@ -1,8 +1,8 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-    phone: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
+    phone: { type: String, unique: true },
+    password: { type: String },
     type: { type: String, enum: ['individual', 'company'], default: 'individual' },
     role: { type: String, enum: ['individual', 'company-head', 'member'], default: 'individual' },
     company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },
@@ -10,8 +10,8 @@ const userSchema = new mongoose.Schema({
     headName: { type: String },
     displayName: { type: String },
     taqeem: {
-        username: { type: String, index: true },
-        password: { type: String },
+        username: { type: String, index: true, required: true },
+        password: { type: String, required: true },
         bootstrap_used: { type: Boolean, default: false },
     },
     permissions: { type: [String], default: [] }

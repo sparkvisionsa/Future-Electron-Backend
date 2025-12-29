@@ -153,6 +153,12 @@ exports.login = async (req, res) => {
 
 exports.taqeemBootstrap = async (req, res) => {
     try {
+        if (req.userId) {
+            return res.json({
+                status: "NORMAL_ACCOUNT",
+                userId: user._id
+            });
+        }
         const { username, password } = req.body;
 
         let user = await User.findOne({ "taqeem.username": username });
@@ -242,6 +248,8 @@ exports.taqeemBootstrap = async (req, res) => {
 exports.authorizeTaqeem = async (req, res) => {
     try {
         const userId = req.userId;
+        console.log("userId", userId);
+
 
         const user = await User.findById(userId);
 

@@ -261,12 +261,12 @@ exports.processElrajhiExcel = async (req, res) => {
       "";
     const userId = userContext.id || userContext._id || null;
 
-    if (!userPhone) {
-      return res.status(400).json({
-        status: "failed",
-        error: "User phone is required to submit reports.",
-      });
-    }
+    // if (!userPhone) {
+    //   return res.status(400).json({
+    //     status: "failed",
+    //     error: "User phone is required to submit reports.",
+    //   });
+    // }
 
     const excelFile = req.files.excel[0].path;
     const sourceExcelName = req.files.excel[0].originalname || "elrajhi.xlsx";

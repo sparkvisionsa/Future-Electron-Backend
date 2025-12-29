@@ -9,6 +9,7 @@ const authMiddleware = (req, res, next) => {
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
     try {
         const decoded = verifyToken(token);
+        console.log("decoded", decoded);
         req.userId = decoded.id; // Set the userId from the token payload
         next();
     } catch (error) {
