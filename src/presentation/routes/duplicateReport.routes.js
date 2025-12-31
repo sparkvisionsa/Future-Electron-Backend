@@ -7,6 +7,11 @@ const duplicateReportController = require("../controllers/duplicateReport.contro
 router.use(authMiddleware);
 
 router.get("/latest", duplicateReportController.getLatestForUser);
+router.get("/", duplicateReportController.listReportsForUser);
+router.patch("/:id", duplicateReportController.updateDuplicateReport);
+router.delete("/:id", duplicateReportController.deleteDuplicateReport);
+router.patch("/:id/assets/:index", duplicateReportController.updateDuplicateReportAsset);
+router.delete("/:id/assets/:index", duplicateReportController.deleteDuplicateReportAsset);
 router.post(
   "/",
   upload.fields([

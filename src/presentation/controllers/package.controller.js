@@ -1,5 +1,20 @@
 const Package = require('../../infrastructure/models/package');
 const Subscription = require('../../infrastructure/models/subscription');
+const PaymentRequest = require('../../infrastructure/models/paymentRequest');
+const User = require('../../infrastructure/models/user');
+
+const ADMIN_PHONE = process.env.ADMIN_PHONE || '011111';
+const REQUEST_POPULATE = [
+    { path: 'userId', select: 'phone taqeem.username displayName' },
+    { path: 'packageId', select: 'name points' }
+];
+
+const getUserById = async (userId) => {
+    if (!userId) return null;
+    return User.findById(userId);
+};
+
+const isAdminUser = (user) => Boolean(user && user.phone === ADMIN_PHONE);
 
 exports.getAllPackages = async (req, res) => {
     try {
@@ -74,5 +89,146 @@ exports.getUserSubscriptions = async (req, res) => {
         res.json({ totalPoints, subscriptions });
     } catch (error) {
         res.status(500).json({ message: error.message });
+    }
+};
+
+exports.createPackageRequest = async (req, res) => {
+    const { packageId } = req.body;
+    if (!packageId) {
+        return res.status(400).json({ message: 'packageId is required' });
+    }
+
+    try {
+        const pkg = await Package.findById(packageId);
+        if (!pkg) {
+            return res.status(404).json({ message: 'Package not found' });
+        }
+
+        const request = new PaymentRequest({
+            userId: req.userId,
+            packageId: pkg._id,
+            packageName: pkg.name,
+            packagePoints: pkg.points,
+            status: 'pending',
+            userNotified: true
+        });
+
+        await request.save();
+        await request.populate(REQUEST_POPULATE);
+        res.status(201).json(request);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to create request', error: error.message });
+    }
+};
+
+exports.getPackageRequests = async (req, res) => {
+    try {
+        const user = await getUserById(req.userId);
+        const query = isAdminUser(user) ? {} : { userId: req.userId };
+
+        const requests = await PaymentRequest.find(query)
+            .sort({ createdAt: -1 })
+            .populate(REQUEST_POPULATE);
+
+        res.json(requests || []);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to load requests', error: error.message });
+    }
+};
+
+exports.uploadRequestTransferImage = async (req, res) => {
+    const { id } = req.params;
+    if (!req.file) {
+        return res.status(400).json({ message: 'Transfer image is required' });
+    }
+
+    try {
+        const request = await PaymentRequest.findById(id);
+        if (!request) {
+            return res.status(404).json({ message: 'Request not found' });
+        }
+
+        const user = await getUserById(req.userId);
+        const isAdmin = isAdminUser(user);
+        if (!isAdmin && request.userId.toString() !== req.userId) {
+            return res.status(403).json({ message: 'Not authorized to upload for this request' });
+        }
+
+        if (request.status === 'confirmed') {
+            return res.status(400).json({ message: 'Request already confirmed' });
+        }
+
+        request.transferImagePath = `/uploads/transfers/${req.file.filename}`;
+        request.transferImageOriginalName = req.file.originalname;
+        await request.save();
+        await request.populate(REQUEST_POPULATE);
+        res.json(request);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to upload transfer image', error: error.message });
+    }
+};
+
+exports.updatePackageRequestStatus = async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!['confirmed', 'rejected'].includes(status)) {
+        return res.status(400).json({ message: 'Invalid status' });
+    }
+
+    try {
+        const request = await PaymentRequest.findById(id);
+        if (!request) {
+            return res.status(404).json({ message: 'Request not found' });
+        }
+
+        if (request.status !== 'pending') {
+            return res.status(400).json({ message: 'Request already processed' });
+        }
+
+        if (status === 'confirmed' && !request.transferImagePath) {
+            return res.status(400).json({ message: 'Transfer image is required to approve' });
+        }
+
+        let subscription = null;
+        if (status === 'confirmed') {
+            const pkg = await Package.findById(request.packageId);
+            if (!pkg) {
+                return res.status(404).json({ message: 'Package not found' });
+            }
+            subscription = new Subscription({ userId: request.userId, packageId: request.packageId });
+            await subscription.save();
+        }
+
+        request.status = status;
+        request.decisionAt = new Date();
+        request.userNotified = false;
+        await request.save();
+        await request.populate(REQUEST_POPULATE);
+
+        res.json({ request, subscription });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to update request status', error: error.message });
+    }
+};
+
+exports.acknowledgePackageRequest = async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const request = await PaymentRequest.findById(id);
+        if (!request) {
+            return res.status(404).json({ message: 'Request not found' });
+        }
+
+        if (request.userId.toString() !== req.userId) {
+            return res.status(403).json({ message: 'Not authorized to acknowledge this request' });
+        }
+
+        request.userNotified = true;
+        await request.save();
+        await request.populate(REQUEST_POPULATE);
+        res.json(request);
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to acknowledge request', error: error.message });
     }
 };

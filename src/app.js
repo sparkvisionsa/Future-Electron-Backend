@@ -13,6 +13,7 @@ app.use(express.urlencoded({
 }));
 app.use(cookieParser());
 app.use(morgan('dev'));
+app.use('/uploads', express.static('uploads'));
 
 app.use('/api', routes);
 app.get('/', (req, res) => res.json({ message: 'Hello World' }));

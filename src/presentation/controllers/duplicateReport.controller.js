@@ -65,6 +65,7 @@ const buildUserFilter = (user = {}) => {
     clauses.push({ user_phone: user.phone });
     clauses.push({ telephone: user.phone });
   }
+  if (user.company) clauses.push({ company: user.company });
   return clauses.length ? { $or: clauses } : {};
 };
 
@@ -92,8 +93,8 @@ const extractAssetsFromExcel = (excelPath, defaults = {}) => {
       const assetName = normalized.assetname || normalized.asset || normalized.assetnamear || "";
       const finalValue = normalized.finalvalue || normalized["final value"] || "";
       const assetUsageId = normalized.assetusageid || normalized.asset_usage_id || normalized.usageid || "";
-      const region = normalized.region || "";
-      const city = normalized.city || "";
+      const region = normalized.region || normalized.regionname || "";
+      const city = normalized.city || normalized.cityname || "";
       const assetId = normalized.id || normalized.assetid || "";
 
       if (!assetName) {
@@ -130,6 +131,25 @@ const extractAssetsFromExcel = (excelPath, defaults = {}) => {
   }
 
   return assets;
+};
+
+const sanitizeValuers = (valuers = []) => {
+  if (!Array.isArray(valuers)) return [];
+  return valuers
+    .map((valuer) => ({
+      valuer_name: valuer.valuer_name || valuer.valuerName || "",
+      contribution_percentage: Number(valuer.contribution_percentage ?? valuer.percentage ?? 0),
+    }))
+    .filter((valuer) => valuer.valuer_name);
+};
+
+const buildUserReportQuery = (user, reportId) => {
+  const filter = buildUserFilter(user || {});
+  if (!Object.keys(filter).length) return null;
+  if (reportId) {
+    return { _id: reportId, ...filter };
+  }
+  return filter;
 };
 
 exports.getLatestForUser = async (req, res) => {
@@ -177,6 +197,197 @@ exports.getLatestForUser = async (req, res) => {
   }
 };
 
+exports.listReportsForUser = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const query = buildUserReportQuery(req.user);
+    if (!query) {
+      return res.status(401).json({ success: false, message: "User context missing." });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
+    const reports = await DuplicateReport.find(query)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit);
+
+    return res.json({ success: true, reports });
+  } catch (error) {
+    console.error("Error listing duplicate reports:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.updateDuplicateReport = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const reportId = req.params.id;
+    const query = buildUserReportQuery(req.user, reportId);
+    if (!query) {
+      return res.status(401).json({ success: false, message: "User context missing." });
+    }
+
+    const report = await DuplicateReport.findOne(query);
+    if (!report) {
+      return res.status(404).json({ success: false, message: "Report not found." });
+    }
+
+    const updates = {};
+    const allowedFields = [
+      "report_id",
+      "title",
+      "purpose_id",
+      "value_premise_id",
+      "report_type",
+      "valued_at",
+      "submitted_at",
+      "inspection_date",
+      "assumptions",
+      "special_assumptions",
+      "value",
+      "valuation_currency",
+      "owner_name",
+      "client_name",
+      "telephone",
+      "email",
+    ];
+
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    });
+
+    if (req.body.has_other_users !== undefined) {
+      updates.has_other_users = toBool(req.body.has_other_users);
+    }
+    if (req.body.report_users !== undefined) {
+      updates.report_users = cleanArray(req.body.report_users);
+    }
+    if (req.body.valuers !== undefined) {
+      updates.valuers = sanitizeValuers(req.body.valuers);
+    }
+    if (req.body.checked !== undefined) {
+      updates.checked = toBool(req.body.checked);
+    }
+
+    Object.assign(report, updates);
+    await report.save();
+
+    return res.json({ success: true, report });
+  } catch (error) {
+    console.error("Error updating duplicate report:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.deleteDuplicateReport = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const reportId = req.params.id;
+    const query = buildUserReportQuery(req.user, reportId);
+    if (!query) {
+      return res.status(401).json({ success: false, message: "User context missing." });
+    }
+
+    const result = await DuplicateReport.deleteOne(query);
+    if (!result.deletedCount) {
+      return res.status(404).json({ success: false, message: "Report not found." });
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting duplicate report:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.updateDuplicateReportAsset = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const reportId = req.params.id;
+    const assetIndex = Number(req.params.index);
+    if (!Number.isInteger(assetIndex) || assetIndex < 0) {
+      return res.status(400).json({ success: false, message: "Invalid asset index." });
+    }
+
+    const query = buildUserReportQuery(req.user, reportId);
+    if (!query) {
+      return res.status(401).json({ success: false, message: "User context missing." });
+    }
+
+    const report = await DuplicateReport.findOne(query);
+    if (!report) {
+      return res.status(404).json({ success: false, message: "Report not found." });
+    }
+
+    if (!Array.isArray(report.asset_data) || assetIndex >= report.asset_data.length) {
+      return res.status(400).json({ success: false, message: "Asset index out of range." });
+    }
+
+    const asset = report.asset_data[assetIndex];
+    const updates = {};
+    const allowedFields = ["asset_name", "asset_usage_id", "final_value", "region", "city"];
+
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    });
+
+    const normalized = asset?.toObject ? asset.toObject() : { ...asset };
+    report.asset_data[assetIndex] = { ...normalized, ...updates };
+    await report.save();
+
+    return res.json({ success: true, asset: report.asset_data[assetIndex] });
+  } catch (error) {
+    console.error("Error updating duplicate report asset:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.deleteDuplicateReportAsset = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const reportId = req.params.id;
+    const assetIndex = Number(req.params.index);
+    if (!Number.isInteger(assetIndex) || assetIndex < 0) {
+      return res.status(400).json({ success: false, message: "Invalid asset index." });
+    }
+
+    const query = buildUserReportQuery(req.user, reportId);
+    if (!query) {
+      return res.status(401).json({ success: false, message: "User context missing." });
+    }
+
+    const report = await DuplicateReport.findOne(query);
+    if (!report) {
+      return res.status(404).json({ success: false, message: "Report not found." });
+    }
+
+    if (!Array.isArray(report.asset_data) || assetIndex >= report.asset_data.length) {
+      return res.status(400).json({ success: false, message: "Asset index out of range." });
+    }
+
+    report.asset_data.splice(assetIndex, 1);
+    await report.save();
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting duplicate report asset:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.createDuplicateReport = async (req, res) => {
   try {
     const user = req.user || {};
@@ -207,14 +418,7 @@ exports.createDuplicateReport = async (req, res) => {
       return res.status(400).json({ success: false, message: "No assets found in provided excel file." });
     }
 
-    const valuers = Array.isArray(payload.valuers)
-      ? payload.valuers
-          .map((v) => ({
-            valuer_name: v.valuer_name || v.valuerName || "",
-            contribution_percentage: Number(v.contribution_percentage ?? v.percentage ?? 0),
-          }))
-          .filter((v) => v.valuer_name)
-      : [];
+    const valuers = sanitizeValuers(payload.valuers);
 
     const duplicateReport = new DuplicateReport({
       user_id: user.id,

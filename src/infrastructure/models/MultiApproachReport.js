@@ -10,6 +10,7 @@ const ValuerSchema = new mongoose.Schema(
 
 const AssetSchema = new mongoose.Schema(
   {
+    id: { type: String },
     asset_id: { type: Number },
     asset_name: { type: String, required: true },
     asset_usage_id: { type: Number, required: true },
@@ -35,6 +36,8 @@ const AssetSchema = new mongoose.Schema(
         message: "final_value must be an integer.",
       },
     },
+    pg_no: { type: String },
+    submitState: { type: Number },
 
     // Flags & values for approaches
     market_approach: { type: String },       // "1" or "-"
@@ -137,6 +140,12 @@ const MultiApproachReportSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    report_id: { type: String, default: "" },
+    checked: { type: Boolean, default: false },
+    startSubmitTime: { type: Date },
+    endSubmitTime: { type: Date },
+    pg_count: { type: Number },
 
     // Optional: store full raw Report Info row
 

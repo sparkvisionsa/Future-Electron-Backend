@@ -802,3 +802,170 @@ exports.createManualMultiApproachReport = async (req, res) => {
 }
 
 };
+
+exports.listMultiApproachReports = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
+    const reports = await MultiApproachReport.find({})
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit);
+
+    return res.json({ success: true, reports });
+  } catch (error) {
+    console.error("Error listing multi-approach reports:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.updateMultiApproachReport = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const reportId = req.params.id;
+    const report = await MultiApproachReport.findById(reportId);
+    if (!report) {
+      return res.status(404).json({ success: false, message: "Report not found." });
+    }
+
+    const updates = {};
+    const allowedFields = [
+      "report_id",
+      "title",
+      "purpose_id",
+      "value_premise_id",
+      "report_type",
+      "valued_at",
+      "submitted_at",
+      "inspection_date",
+      "assumptions",
+      "special_assumptions",
+      "value",
+      "final_value",
+      "valuation_currency",
+      "owner_name",
+      "client_name",
+      "telephone",
+      "email",
+      "region",
+      "city",
+      "has_other_users",
+      "report_users",
+      "valuers",
+      "checked",
+    ];
+
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    });
+
+    Object.assign(report, updates);
+    await report.save();
+
+    return res.json({ success: true, report });
+  } catch (error) {
+    console.error("Error updating multi-approach report:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.deleteMultiApproachReport = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const reportId = req.params.id;
+    const report = await MultiApproachReport.findById(reportId);
+    if (!report) {
+      return res.status(404).json({ success: false, message: "Report not found." });
+    }
+
+    await report.deleteOne();
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting multi-approach report:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.updateMultiApproachAsset = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const reportId = req.params.id;
+    const assetIndex = Number(req.params.index);
+    if (!Number.isInteger(assetIndex) || assetIndex < 0) {
+      return res.status(400).json({ success: false, message: "Invalid asset index." });
+    }
+
+    const report = await MultiApproachReport.findById(reportId);
+    if (!report) {
+      return res.status(404).json({ success: false, message: "Report not found." });
+    }
+
+    if (!Array.isArray(report.asset_data) || assetIndex >= report.asset_data.length) {
+      return res.status(400).json({ success: false, message: "Asset index out of range." });
+    }
+
+    const asset = report.asset_data[assetIndex];
+    const updates = {};
+    const allowedFields = ["asset_name", "asset_usage_id", "final_value", "region", "city"];
+
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    });
+
+    const normalized = asset?.toObject ? asset.toObject() : { ...asset };
+    report.asset_data[assetIndex] = { ...normalized, ...updates };
+    await report.save();
+
+    return res.json({ success: true, asset: report.asset_data[assetIndex] });
+  } catch (error) {
+    console.error("Error updating multi-approach asset:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.deleteMultiApproachAsset = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const reportId = req.params.id;
+    const assetIndex = Number(req.params.index);
+    if (!Number.isInteger(assetIndex) || assetIndex < 0) {
+      return res.status(400).json({ success: false, message: "Invalid asset index." });
+    }
+
+    const report = await MultiApproachReport.findById(reportId);
+    if (!report) {
+      return res.status(404).json({ success: false, message: "Report not found." });
+    }
+
+    if (!Array.isArray(report.asset_data) || assetIndex >= report.asset_data.length) {
+      return res.status(400).json({ success: false, message: "Asset index out of range." });
+    }
+
+    report.asset_data.splice(assetIndex, 1);
+    await report.save();
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting multi-approach asset:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
