@@ -1,4 +1,5 @@
 const { createReportUC } = require('../../application/services/report/uploadAssetsToDB.uc');
+const { getAllReportsUC } = require('../../application/services/report/getAllreports.uc');
 const { reportExistenceCheckUC } = require('../../application/services/report/reportExistenceCheck.uc');
 const { addCommonFields } = require('../../application/services/report/addCommonFields.uc');
 const { checkMissingPagesUC } = require('../../application/services/report/checkMissingPages.uc');
@@ -39,6 +40,164 @@ const reportController = {
         }
     },
 
+
+    async getAllReports(req, res) {
+        try {
+            // Extract pagination and filter parameters from query string
+            const {
+                page = 1,
+                limit = 10,
+                status,
+                reportType,
+                priority,
+                startDate,
+                endDate,
+                search,
+                sortBy = 'createdAt',
+                sortOrder = 'desc'
+            } = req.query;
+
+            console.log(`[getAllReports] Request received with parameters:`, {
+                page, limit, status, reportType, priority,
+                startDate, endDate, search, sortBy, sortOrder
+            });
+
+            // Parse numeric values
+            const pageNumber = parseInt(page);
+            const limitNumber = parseInt(limit);
+
+            // Validate pagination parameters
+            if (isNaN(pageNumber) || isNaN(limitNumber)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Page and limit must be valid numbers'
+                });
+            }
+
+            if (pageNumber < 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Page number must be greater than or equal to 1'
+                });
+            }
+
+            if (limitNumber < 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Limit must be greater than or equal to 1'
+                });
+            }
+
+            if (limitNumber > 100) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Limit cannot exceed 100 items per page'
+                });
+            }
+
+            // Prepare filters object
+            const filters = {};
+
+            // Status filter
+            if (status) {
+                const validStatuses = ['draft', 'pending', 'in_progress', 'completed', 'archived'];
+                if (validStatuses.includes(status)) {
+                    filters.status = status;
+                } else {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+                    });
+                }
+            }
+
+            // Report type filter
+            if (reportType) {
+                filters.reportType = reportType;
+            }
+
+            // Priority filter
+            if (priority) {
+                const validPriorities = ['low', 'medium', 'high', 'critical'];
+                if (validPriorities.includes(priority)) {
+                    filters.priority = priority;
+                } else {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Invalid priority. Must be one of: ${validPriorities.join(', ')}`
+                    });
+                }
+            }
+
+            // Date range filter
+            if (startDate || endDate) {
+                if (startDate && !isValidDate(startDate)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid startDate format. Use YYYY-MM-DD'
+                    });
+                }
+                if (endDate && !isValidDate(endDate)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid endDate format. Use YYYY-MM-DD'
+                    });
+                }
+                if (startDate) filters.startDate = startDate;
+                if (endDate) filters.endDate = endDate;
+            }
+
+            // Search filter
+            if (search && search.trim()) {
+                filters.search = search.trim();
+            }
+
+            // Sort validation
+            const validSortFields = ['createdAt', 'updatedAt', 'title', 'status', 'priority', 'reportType'];
+            if (sortBy && !validSortFields.includes(sortBy)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid sort field. Must be one of: ${validSortFields.join(', ')}`
+                });
+            }
+
+            if (sortOrder && !['asc', 'desc'].includes(sortOrder.toLowerCase())) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid sort order. Must be "asc" or "desc"'
+                });
+            }
+
+            console.log(`[getAllReports] Calling use case with:`, {
+                page: pageNumber,
+                limit: limitNumber,
+                sortBy,
+                sortOrder,
+                filters
+            });
+
+            // Call the use case with all parameters
+            const result = await getAllReportsUC({
+                page: pageNumber,
+                limit: limitNumber,
+                sortBy,
+                sortOrder,
+                ...filters
+            });
+
+            console.log(`[getAllReports] Successfully fetched ${result.data.length} reports out of ${result.pagination.totalItems} total`);
+
+            res.status(200).json(result);
+
+        } catch (error) {
+            console.error('[getAllReports] Error fetching reports:', error);
+            res.status(500).json({
+                success: false,
+                message: `Failed to fetch reports: ${error.message}`
+            });
+        }
+    },
+
     async checkMissingPages(req, res) {
         try {
             const { reportId } = req.params;
@@ -67,6 +226,123 @@ const reportController = {
             res.status(500).json({ success: false, message: error.message });
         }
     },
+    async createReportWithCommonFields(req, res) {
+        try {
+            const {
+                reportId,
+                reportData,
+                commonFields = {}
+            } = req.body;
+
+            // Validate required fields
+            if (!reportId || !reportId.trim()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Report ID is required'
+                });
+            }
+
+            if (!reportData || !Array.isArray(reportData) || reportData.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Report data is required and must be a non-empty array'
+                });
+            }
+
+            // Extract common fields
+            const {
+                region,
+                city,
+                inspectionDate,
+                ownerName
+            } = commonFields;
+
+            console.log(`[createReportWithCommonFields] Creating report: ${reportId}`);
+            console.log(`[createReportWithCommonFields] Records: ${reportData.length}`);
+            console.log(`[createReportWithCommonFields] Common fields:`, {
+                region: region || 'Not set',
+                city: city || 'Not set',
+                inspectionDate: inspectionDate || 'Not set',
+                ownerName: ownerName || 'Not set'
+            });
+
+            // Apply common fields to all report data entries
+            const enhancedReportData = reportData.map(entry => {
+                const enhancedEntry = { ...entry };
+
+                // Only apply common fields if they're provided
+                if (inspectionDate) {
+                    enhancedEntry.inspection_date = inspectionDate;
+                }
+                if (region) {
+                    enhancedEntry.region = region;
+                }
+                if (city) {
+                    enhancedEntry.city = city;
+                }
+                if (ownerName) {
+                    enhancedEntry.owner_name = ownerName;
+                }
+
+                // Ensure all required fields have default values
+                enhancedEntry.asset_type = enhancedEntry.asset_type || '0';
+                enhancedEntry.production_capacity = enhancedEntry.production_capacity || '0';
+                enhancedEntry.production_capacity_measuring_unit = enhancedEntry.production_capacity_measuring_unit || '0';
+                enhancedEntry.product_type = enhancedEntry.product_type || '0';
+                enhancedEntry.country = enhancedEntry.country || 'المملكة العربية السعودية';
+                enhancedEntry.submitState = enhancedEntry.submitState || 0;
+
+                // Clean up any undefined/null values
+                Object.keys(enhancedEntry).forEach(key => {
+                    if (enhancedEntry[key] === undefined || enhancedEntry[key] === null) {
+                        delete enhancedEntry[key];
+                    }
+                });
+
+                return enhancedEntry;
+            });
+
+            console.log(`[createReportWithCommonFields] Enhanced ${enhancedReportData.length} records with common fields`);
+
+            // Call the existing use case with enhanced data
+            const { success, message, data } = await createReportUC(
+                reportId.trim(),
+                enhancedReportData,
+                req.user
+            );
+
+            if (success) {
+                console.log(`[createReportWithCommonFields] Report created successfully: ${reportId}`);
+                res.status(200).json({
+                    success,
+                    message: message || `Report '${reportId}' created successfully with ${enhancedReportData.length} assets`,
+                    data: {
+                        ...data,
+                        commonFieldsApplied: {
+                            region: region || null,
+                            city: city || null,
+                            inspectionDate: inspectionDate || null,
+                            ownerName: ownerName || null
+                        },
+                        recordCount: enhancedReportData.length
+                    }
+                });
+            } else {
+                console.error(`[createReportWithCommonFields] Failed to create report: ${reportId}`, message);
+                res.status(500).json({
+                    success,
+                    message: message || `Failed to create report '${reportId}'`,
+                    data
+                });
+            }
+        } catch (error) {
+            console.error('[createReportWithCommonFields] Error:', error);
+            res.status(500).json({
+                success: false,
+                message: `Internal server error: ${error.message}`
+            });
+        }
+    }
 };
 
 module.exports = reportController;
