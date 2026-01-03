@@ -126,7 +126,7 @@ urgentSchema.pre("validate", function () {
     const submitted = new Date(this.submitted_at);
     if (!isNaN(valued.getTime()) && !isNaN(submitted.getTime()) && valued > submitted) {
       this.invalidate("valued_at", "Date of Valuation must be on or before Report Issuing Date");
-    }  
+    }
   }
   // next();
 });
