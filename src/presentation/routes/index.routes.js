@@ -10,6 +10,7 @@ const uploadRoute = require("../routes/upload.route");
 const elrajhiUploadRoute = require("../routes/elrajhiUpload.route");
 const duplicateReportRoutes = require("../routes/duplicateReport.routes");
 const multiApproachRoutes = require("../routes/multiApproach.route");
+const submitReportsQuicklyRoutes = require("../routes/submitReportsQuickly.route");
 
 
 
@@ -28,6 +29,7 @@ router.use("/upload", uploadRoute);
 router.use("/elrajhi-upload", elrajhiUploadRoute);
 router.use("/duplicate-report", duplicateReportRoutes);
 router.use("/multi-approach", multiApproachRoutes);
+router.use("/submit-reports-quickly", submitReportsQuicklyRoutes);
 
 router.get('/health', (req, res) => res.json({ ok: true }));
 

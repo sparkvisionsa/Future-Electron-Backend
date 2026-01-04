@@ -1,12 +1,113 @@
 const Ad = require("../../infrastructure/models/Ad");
 
 /**
+ * Extract manufacturing year from text (title/description)
+ * Looks for 4-digit years between 1950 and current year + 1
+ */
+function extractManufacturingYear(text) {
+  if (!text || typeof text !== 'string') return null;
+  
+  // Match 4-digit years between 1950 and current year + 1
+  const currentYear = new Date().getFullYear();
+  const yearPattern = /\b(19[5-9]\d|20[0-4]\d)\b/g;
+  const matches = text.match(yearPattern);
+  
+  if (matches && matches.length > 0) {
+    // Get the most likely manufacturing year (usually the first or most recent valid year)
+    const years = matches.map(y => parseInt(y)).filter(y => y >= 1950 && y <= currentYear + 1);
+    if (years.length > 0) {
+      // Return the highest year (most recent) as it's likely the manufacturing year
+      return Math.max(...years);
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Extract car brand from text (title/description)
+ * Supports both English and Arabic car brand names
+ */
+function extractCarBrand(text) {
+  if (!text || typeof text !== 'string') return null;
+  
+  const textLower = text.toLowerCase();
+  const textNormalized = textLower.replace(/[^\w\s\u0600-\u06FF]/g, ' '); // Keep Arabic and English chars
+  
+  // Common car brands (English and Arabic)
+  const carBrands = [
+    // English brands
+    { patterns: ['toyota', 'تويوتا'], name: 'Toyota' },
+    { patterns: ['nissan', 'نيسان'], name: 'Nissan' },
+    { patterns: ['honda', 'هوندا'], name: 'Honda' },
+    { patterns: ['hyundai', 'هيونداي'], name: 'Hyundai' },
+    { patterns: ['kia', 'كيا'], name: 'Kia' },
+    { patterns: ['mazda', 'مازدا'], name: 'Mazda' },
+    { patterns: ['mitsubishi', 'ميتسوبيشي'], name: 'Mitsubishi' },
+    { patterns: ['suzuki', 'سوزوكي'], name: 'Suzuki' },
+    { patterns: ['ford', 'فورد'], name: 'Ford' },
+    { patterns: ['chevrolet', 'chev', 'شيفروليه', 'شيفر'], name: 'Chevrolet' },
+    { patterns: ['bmw', 'بي ام دبليو', 'بى ام دبليو'], name: 'BMW' },
+    { patterns: ['mercedes', 'mercedes-benz', 'مرسيدس', 'مرسيدس بنز'], name: 'Mercedes-Benz' },
+    { patterns: ['audi', 'أودي', 'اودي'], name: 'Audi' },
+    { patterns: ['volkswagen', 'vw', 'فولكس واجن', 'فولكس'], name: 'Volkswagen' },
+    { patterns: ['peugeot', 'بيجو'], name: 'Peugeot' },
+    { patterns: ['renault', 'رينو'], name: 'Renault' },
+    { patterns: ['opel', 'أوبل', 'اوبل'], name: 'Opel' },
+    { patterns: ['dodge', 'دودج'], name: 'Dodge' },
+    { patterns: ['jeep', 'جيب'], name: 'Jeep' },
+    { patterns: ['gmc', 'جي ام سي'], name: 'GMC' },
+    { patterns: ['cadillac', 'كاديلاك'], name: 'Cadillac' },
+    { patterns: ['lexus', 'لكزس'], name: 'Lexus' },
+    { patterns: ['infiniti', 'انفينيتي'], name: 'Infiniti' },
+    { patterns: ['acura', 'أكورا', 'اكورا'], name: 'Acura' },
+    { patterns: ['volvo', 'فولفو'], name: 'Volvo' },
+    { patterns: ['land rover', 'لاند روفر'], name: 'Land Rover' },
+    { patterns: ['range rover', 'رينج روفر'], name: 'Range Rover' },
+    { patterns: ['porsche', 'بورش'], name: 'Porsche' },
+    { patterns: ['jaguar', 'جاكوار'], name: 'Jaguar' },
+    { patterns: ['mini', 'ميني'], name: 'Mini' },
+    { patterns: ['fiat', 'فيات'], name: 'Fiat' },
+    { patterns: ['skoda', 'سكودا'], name: 'Skoda' },
+    { patterns: ['seat', 'سيات'], name: 'SEAT' },
+    { patterns: ['geely', 'جيلي'], name: 'Geely' },
+    { patterns: ['mg', 'ام جي'], name: 'MG' },
+    { patterns: ['changan', 'تشانجان'], name: 'Changan' },
+    { patterns: ['haval', 'هافال'], name: 'Haval' },
+    { patterns: ['chery', 'شيري'], name: 'Chery' },
+    { patterns: ['great wall', 'جريت وول'], name: 'Great Wall' },
+  ];
+  
+  // Check each brand
+  for (const brand of carBrands) {
+    for (const pattern of brand.patterns) {
+      // Use word boundary for English, simple match for Arabic
+      if (pattern.match(/[\u0600-\u06FF]/)) {
+        // Arabic pattern - simple contains check
+        if (textNormalized.includes(pattern.toLowerCase())) {
+          return brand.name;
+        }
+      } else {
+        // English pattern - use word boundary
+        const regex = new RegExp(`\\b${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        if (regex.test(text)) {
+          return brand.name;
+        }
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
  * GET /api/ads/all
  * Query:
  *  - page=1
  *  - limit=500 (max 5000)
  *  - city=string (filter by city)
- *  - currency=string (filter by currency)
+ *  - manufacturingYear=number (filter by manufacturing year)
+ *  - carBrand=string (filter by car brand)
  *  - hasPrice=true/false (filter by price existence)
  *  - hasImages=true/false (filter by images existence)
  *  - hasContact=true/false (filter by contact existence)
@@ -27,10 +128,25 @@ async function getAllAds(req, res) {
       query.city = req.query.city;
     }
 
-    // Currency filter
-    if (req.query.currency) {
-      query.currency = req.query.currency;
+    // Manufacturing Year filter - will be applied after extraction
+    let manufacturingYearFilter = null;
+    if (req.query.manufacturingYear) {
+      const year = parseInt(req.query.manufacturingYear, 10);
+      if (!isNaN(year) && year >= 1950) {
+        manufacturingYearFilter = year;
+      }
     }
+
+    // Car Brand filter - will be applied after extraction
+    let carBrandFilter = null;
+    if (req.query.carBrand) {
+      carBrandFilter = req.query.carBrand;
+    }
+
+    // If we have extraction-based filters, we need to load more items to filter properly
+    // Otherwise pagination would filter after limiting, which is incorrect
+    const needsExtractionFilter = manufacturingYearFilter !== null || carBrandFilter !== null;
+    const effectiveLimit = needsExtractionFilter ? Math.max(limit * 10, 5000) : limit; // Load more when filtering
 
     // Price filter
     if (req.query.hasPrice === 'true') {
@@ -98,8 +214,8 @@ async function getAllAds(req, res) {
     const [items, total] = await Promise.all([
       Ad.find(query)
         .sort({ lastScrapedAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
+        .skip(needsExtractionFilter ? 0 : (page - 1) * limit) // Skip pagination if we need to filter
+        .limit(needsExtractionFilter ? effectiveLimit : limit) // Load more if filtering
         .lean(),
       Ad.countDocuments(query),
     ]);
@@ -129,9 +245,15 @@ async function getAllAds(req, res) {
       console.log('=====================================');
     }
 
-    // Ensure images field is always present and properly formatted
-    // Also check for alternative field names that might contain images
+    // Extract manufacturing year and car brand, and ensure images field is properly formatted
     const itemsWithImages = items.map((item, index) => {
+      // Extract manufacturing year from title
+      const titleText = item.title || '';
+      const descriptionText = item.description || '';
+      const combinedText = `${titleText} ${descriptionText}`;
+      
+      item.manufacturingYear = extractManufacturingYear(combinedText);
+      item.carBrand = extractCarBrand(combinedText) || extractCarBrand(titleText) || extractCarBrand(descriptionText);
       // Check for images in various possible field names
       let imagesArray = item.images;
       
@@ -249,12 +371,40 @@ async function getAllAds(req, res) {
       return item;
     });
 
+    // Apply manufacturing year and car brand filters after extraction
+    let filteredItems = itemsWithImages;
+    
+    if (manufacturingYearFilter !== null) {
+      filteredItems = filteredItems.filter(item => item.manufacturingYear === manufacturingYearFilter);
+    }
+    
+    if (carBrandFilter !== null) {
+      filteredItems = filteredItems.filter(item => 
+        item.carBrand && item.carBrand.toLowerCase() === carBrandFilter.toLowerCase()
+      );
+    }
+
+    // Recalculate total and pagination for filtered results
+    let filteredTotal = total;
+    let paginatedItems = filteredItems;
+    
+    if (needsExtractionFilter) {
+      // When using extraction filters, we filtered all loaded items
+      // We need to get the actual total count by loading all matching items
+      // For now, we'll use the filtered count as an approximation
+      // In production, you might want to store extracted values in DB for better performance
+      filteredTotal = filteredItems.length;
+      
+      // Apply pagination to filtered items
+      paginatedItems = filteredItems.slice((page - 1) * limit, page * limit);
+    }
+
     return res.json({
       page,
       limit,
-      total,
-      pages: Math.ceil(total / limit),
-      items: itemsWithImages, // ✅ all fields with normalized images
+      total: filteredTotal,
+      pages: Math.ceil(filteredTotal / limit),
+      items: paginatedItems, // ✅ all fields with normalized images, manufacturingYear, and carBrand
     });
   } catch (err) {
     return res.status(500).json({ error: err?.message || String(err) });
