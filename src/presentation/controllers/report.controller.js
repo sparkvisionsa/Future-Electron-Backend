@@ -4,6 +4,7 @@ const { reportExistenceCheckUC } = require('../../application/services/report/re
 const { addCommonFields } = require('../../application/services/report/addCommonFields.uc');
 const { checkMissingPagesUC } = require('../../application/services/report/checkMissingPages.uc');
 const { getReportsByUserIdUC } = require('../../application/services/report/getReportsByUserId.uc');
+const Report = require("../../infrastructure/models/report");
 
 const reportController = {
     async createReport(req, res) {
@@ -372,6 +373,13 @@ const reportController = {
                     message: "Asset not found on this report"
                 });
             }
+
+            await Report.updateOne(
+                {
+                    _id: reportId
+                },
+                { $set: { "report_status": "INCOMPLETE" } }
+            )
 
             return res.status(200).json({
                 success: true,

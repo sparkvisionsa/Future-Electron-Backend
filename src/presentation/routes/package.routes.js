@@ -26,6 +26,11 @@ router.patch(
     adminOnly,
     packageController.updatePackageRequestStatus
 );
+router.patch(
+    '/deduct',
+    authMiddleware,
+    packageController.deductUserPoints
+)
 router.post('/requests/:id/ack', authMiddleware, packageController.acknowledgePackageRequest);
 
 module.exports = router;

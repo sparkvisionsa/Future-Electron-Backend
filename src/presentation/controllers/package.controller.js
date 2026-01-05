@@ -2,6 +2,7 @@ const Package = require('../../infrastructure/models/package');
 const Subscription = require('../../infrastructure/models/subscription');
 const PaymentRequest = require('../../infrastructure/models/paymentRequest');
 const User = require('../../infrastructure/models/user');
+const deductPoints = require('../../application/services/packages/deductPoints');
 
 const ADMIN_PHONE = process.env.ADMIN_PHONE || '011111';
 const REQUEST_POPULATE = [
@@ -72,14 +73,25 @@ exports.deletePackage = async (req, res) => {
 exports.subscribeToPackage = async (req, res) => {
     const { packageId } = req.body;
     const userId = req.userId;
+
     try {
-        const subscription = new Subscription({ userId, packageId });
+        const pkg = await Package.findById(packageId);
+        if (!pkg) return res.status(404).json({ message: 'Package not found' });
+
+        const subscription = new Subscription({
+            userId,
+            packageId,
+            remainingPoints: pkg.points
+        });
+
         await subscription.save();
         res.status(201).json(subscription);
+
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
 };
+
 
 exports.getUserSubscriptions = async (req, res) => {
     const userId = req.userId;
@@ -91,6 +103,36 @@ exports.getUserSubscriptions = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
+exports.deductUserPoints = async (req, res) => {
+    try {
+        const userId = req.userId;
+        const amount = Number(req.body.amount);
+
+        if (!userId) {
+            return res.status(400).json({ message: "userId is required" });
+        }
+
+        if (!amount || amount <= 0) {
+            return res.status(400).json({ message: "amount must be a positive number" });
+        }
+
+        await deductPoints(userId, amount);
+
+        return res.json({
+            success: true,
+            message: `Deducted ${amount} points successfully`
+        });
+
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: error.message || "Failed to deduct points"
+        });
+    }
+};
+
+
 
 exports.createPackageRequest = async (req, res) => {
     const { packageId } = req.body;
@@ -195,7 +237,11 @@ exports.updatePackageRequestStatus = async (req, res) => {
             if (!pkg) {
                 return res.status(404).json({ message: 'Package not found' });
             }
-            subscription = new Subscription({ userId: request.userId, packageId: request.packageId });
+            subscription = new Subscription({
+                userId: request.userId,
+                packageId: request.packageId,
+                remainingPoints: pkg.points
+            });
             await subscription.save();
         }
 
