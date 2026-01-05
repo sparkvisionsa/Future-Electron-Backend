@@ -463,9 +463,9 @@ exports.processSubmitReportsQuicklyBatch = async (req, res) => {
       // 3.3 Calculate number of macros (number of assets)
       const number_of_macros = assets.length;
 
-      // 3.4 Generate title and client_name: (number of assets + total of final value)
-      const title = `${number_of_macros} + ${assets_total_value}`;
-      const client_name = `${number_of_macros} + ${assets_total_value}`;
+      // 3.4 Generate title and client_name: عدد الأصول (number_of_macros) + القيمة النهائية (assets_total_value)
+      const title = `عدد الأصول (${number_of_macros}) + القيمة النهائية (${assets_total_value})`;
+      const client_name = `عدد الأصول (${number_of_macros}) + القيمة النهائية (${assets_total_value})`;
 
       // 3.5 Get region and city from first asset (or use empty)
       const firstAsset = assets[0];
