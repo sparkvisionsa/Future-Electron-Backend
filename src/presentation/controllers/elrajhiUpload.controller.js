@@ -49,39 +49,99 @@ function fixMojibake(str) {
   return Buffer.from(str, "latin1").toString("utf8");
 }
 
+// function parseExcelDate(value) {
+//   if (!value) return null;
+
+//   if (value instanceof Date) return value;
+
+//   if (typeof value === "number") {
+//     const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // 1899-12-30
+//     const msPerDay = 24 * 60 * 60 * 1000;
+//     return new Date(excelEpoch.getTime() + value * msPerDay);
+//   }
+
+//   if (typeof value === "string") {
+//     const trimmed = value.trim();
+//     if (!trimmed) return null;
+
+//     if (/^\d+$/.test(trimmed)) {
+//       const serial = parseInt(trimmed, 10);
+//       const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+//       const msPerDay = 24 * 60 * 60 * 1000;
+//       return new Date(excelEpoch.getTime() + serial * msPerDay);
+//     }
+
+//     const parts = trimmed.split(/[\/\-]/).map((p) => p.trim());
+//     if (parts.length !== 3) return null;
+
+//     const [d, m, y] = parts.map((p) => parseInt(p, 10));
+//     if (!d || !m || !y) return null;
+
+//     return new Date(y, m - 1, d);
+//   }
+
+//   return null;
+// }
+
+
+
+
+function toYMDFromDate(d) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10); // yyyy-mm-dd
+}
+
 function parseExcelDate(value) {
   if (!value) return null;
 
-  if (value instanceof Date) return value;
+  // Already a JS Date
+  if (value instanceof Date) {
+    return toYMDFromDate(value);
+  }
 
+  // Excel serial number
   if (typeof value === "number") {
     const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // 1899-12-30
     const msPerDay = 24 * 60 * 60 * 1000;
-    return new Date(excelEpoch.getTime() + value * msPerDay);
+    const d = new Date(excelEpoch.getTime() + value * msPerDay);
+    return toYMDFromDate(d);
   }
 
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!trimmed) return null;
 
+    // numeric serial in string
     if (/^\d+$/.test(trimmed)) {
       const serial = parseInt(trimmed, 10);
       const excelEpoch = new Date(Date.UTC(1899, 11, 30));
       const msPerDay = 24 * 60 * 60 * 1000;
-      return new Date(excelEpoch.getTime() + serial * msPerDay);
+      const d = new Date(excelEpoch.getTime() + serial * msPerDay);
+      return toYMDFromDate(d);
     }
 
+    // allow: dd/mm/yyyy or dd-mm-yyyy (your current behavior)
     const parts = trimmed.split(/[\/\-]/).map((p) => p.trim());
     if (parts.length !== 3) return null;
 
-    const [d, m, y] = parts.map((p) => parseInt(p, 10));
-    if (!d || !m || !y) return null;
+    const [dStr, mStr, yStr] = parts;
+    const dNum = parseInt(dStr, 10);
+    const mNum = parseInt(mStr, 10);
+    const yNum = parseInt(yStr, 10);
+    if (!dNum || !mNum || !yNum) return null;
 
-    return new Date(y, m - 1, d);
+    // build as UTC to avoid timezone shifting
+    const dt = new Date(Date.UTC(yNum, mNum - 1, dNum));
+    return toYMDFromDate(dt);
   }
 
   return null;
 }
+
+
+
+
+
 
 function ensureTempPdf(batch_id, assetId) {
   const tempDir = path.join("uploads", "temp");

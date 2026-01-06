@@ -21,7 +21,7 @@ router.delete("/:id/assets/:index", authMiddleware, deleteSubmitReportsQuicklyAs
 // POST /api/submit-reports-quickly
 router.post(
   "/",
-  authMiddleware,
+  // authMiddleware,
   (req, res, next) => {
     console.log("📥 API HIT: POST /api/submit-reports-quickly");
     next();

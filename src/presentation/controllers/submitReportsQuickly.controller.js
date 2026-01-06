@@ -37,10 +37,9 @@ function parseExcelDate(value) {
 
   if (typeof value === "number") {
     const msPerDay = 24 * 60 * 60 * 1000;
-    const excelEpoch = Date.UTC(1899, 11, 30);
-    const serial = value;
-    const offsetSerial = serial > 59 ? serial - 1 : serial;
-    const dt = new Date(excelEpoch + offsetSerial * msPerDay);
+    const excelEpoch1970 = 25569; // serial for 1970-01-01
+    const days = value - excelEpoch1970;
+    const dt = new Date(days * msPerDay);
     return isNaN(dt.getTime()) ? null : dt;
   }
 
@@ -86,25 +85,19 @@ function parseExcelDate(value) {
   return null;
 }
 
-// Format JS Date -> "yyyy-mm-dd" string
 function formatDateYyyyMmDd(value) {
-  if (!value && value !== 0) return "";
-  let dt = null;
-  if (value instanceof Date) {
-    dt = value;
-  } else {
-    dt = parseExcelDate(value);
-  }
+  if (value === null || value === undefined || value === "") return "";
 
-  if (!dt || isNaN(dt.getTime())) return "";
+  const dt = value instanceof Date ? value : parseExcelDate(value);
+  if (!(dt instanceof Date) || isNaN(dt.getTime())) return "";
 
+  // Use local date parts consistently (same as schema)
   const yyyy = dt.getFullYear();
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
   const dd = String(dt.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
 
-// Get today's date as yyyy-mm-dd string
 function getTodayDateString() {
   const today = new Date();
   const yyyy = today.getFullYear();

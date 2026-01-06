@@ -1,6 +1,55 @@
 const e = require('express');
 const mongoose = require('mongoose');
 
+function toYMD(value) {
+  if (!value) return value;
+
+  // If it's already "yyyy-mm-dd", keep it
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (!s) return value;
+
+    // Already correct
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+    // If ISO string "yyyy-mm-ddT...." -> take first 10 chars
+    if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.slice(0, 10);
+
+    // Support "dd/mm/yyyy" or "dd-mm-yyyy"
+    const parts = s.split(/[\/\-]/);
+    if (parts.length === 3 && parts[0].length <= 2) {
+      const dNum = parseInt(parts[0], 10);
+      const mNum = parseInt(parts[1], 10);
+      const yNum = parseInt(parts[2], 10);
+      if (dNum && mNum && yNum) {
+        const dt = new Date(Date.UTC(yNum, mNum - 1, dNum));
+        if (!isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+      }
+    }
+
+    // Fallback: try parseable date strings
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+
+    return value;
+  }
+
+  // Date object
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return value;
+    return value.toISOString().slice(0, 10);
+  }
+
+  // timestamp number
+  if (typeof value === "number") {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+
+  return value;
+}
+
+
 const urgentSchema = new mongoose.Schema({
   user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   user_phone: { type: String },
@@ -30,18 +79,21 @@ const urgentSchema = new mongoose.Schema({
   report_type: String,
 
   valued_at: {
-    type: Date,
+    type: String,
     required: [true, "valued_at is required"],
+    set: toYMD,
   },
 
   submitted_at: {
-    type: Date,
+    type: String,
     required: [true, "submitted_at is required"],
+    set: toYMD,
   },
 
   inspection_date: {
-    type: Date,
+    type: String,
     required: [true, "inspection_date is required"],
+    set: toYMD,
   },
 
   assumptions: Number,
