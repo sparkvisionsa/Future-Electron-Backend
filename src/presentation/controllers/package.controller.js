@@ -4,6 +4,7 @@ const PaymentRequest = require('../../infrastructure/models/paymentRequest');
 const PaymentRequestMessage = require('../../infrastructure/models/paymentRequestMessage');
 const User = require('../../infrastructure/models/user');
 const deductPoints = require('../../application/services/packages/deductPoints');
+const { createNotification } = require('../../application/services/notification/notification.service');
 
 const ADMIN_PHONE = process.env.ADMIN_PHONE || '011111';
 const PREVIEW_LIMIT = 140;
@@ -206,6 +207,30 @@ exports.createPackageRequest = async (req, res) => {
         await request.save();
         await request.populate(REQUEST_POPULATE);
         res.status(201).json(request);
+
+        try {
+            const adminUser = await User.findOne({ phone: ADMIN_PHONE });
+            if (adminUser?._id) {
+                await createNotification({
+                    userId: adminUser._id,
+                    type: 'package',
+                    level: 'info',
+                    title: 'New package request',
+                    message: `New package request from ${request.userId?.phone || 'user'} for ${pkg.name}.`,
+                    data: { requestId: request._id.toString(), view: 'packages', action: 'requested' }
+                });
+            }
+            await createNotification({
+                userId: req.userId,
+                type: 'package',
+                level: 'success',
+                title: 'Request submitted',
+                message: 'Your package request was submitted successfully.',
+                data: { requestId: request._id.toString(), view: 'packages', action: 'requested' }
+            });
+        } catch (notifyError) {
+            console.warn('Failed to create package request notifications', notifyError);
+        }
     } catch (error) {
         res.status(500).json({ message: 'Failed to create request', error: error.message });
     }
@@ -256,6 +281,30 @@ exports.uploadRequestTransferImage = async (req, res) => {
         await request.save();
         await request.populate(REQUEST_POPULATE);
         res.json(request);
+
+        try {
+            const adminUser = await User.findOne({ phone: ADMIN_PHONE });
+            if (adminUser?._id) {
+                await createNotification({
+                    userId: adminUser._id,
+                    type: 'package',
+                    level: 'info',
+                    title: 'Transfer uploaded',
+                    message: `Transfer image uploaded for request ${request._id.toString()}.`,
+                    data: { requestId: request._id.toString(), view: 'packages', action: 'transfer' }
+                });
+            }
+            await createNotification({
+                userId: request.userId,
+                type: 'package',
+                level: 'success',
+                title: 'Transfer uploaded',
+                message: 'Your transfer image was uploaded successfully.',
+                data: { requestId: request._id.toString(), view: 'packages', action: 'transfer' }
+            });
+        } catch (notifyError) {
+            console.warn('Failed to create transfer notifications', notifyError);
+        }
     } catch (error) {
         res.status(500).json({ message: 'Failed to upload transfer image', error: error.message });
     }
@@ -303,6 +352,21 @@ exports.updatePackageRequestStatus = async (req, res) => {
         await request.populate(REQUEST_POPULATE);
 
         res.json({ request, subscription });
+
+        try {
+            await createNotification({
+                userId: request.userId,
+                type: 'package',
+                level: status === 'confirmed' ? 'success' : 'danger',
+                title: status === 'confirmed' ? 'Request approved' : 'Request rejected',
+                message: status === 'confirmed'
+                    ? `Your package request for ${request.packageName} was approved.`
+                    : `Your package request for ${request.packageName} was rejected.`,
+                data: { requestId: request._id.toString(), view: 'packages', action: status }
+            });
+        } catch (notifyError) {
+            console.warn('Failed to create decision notification', notifyError);
+        }
     } catch (error) {
         res.status(500).json({ message: 'Failed to update request status', error: error.message });
     }
@@ -361,6 +425,18 @@ exports.deletePackageRequest = async (req, res) => {
 
         await PaymentRequestMessage.deleteMany({ requestId: request._id });
         await request.deleteOne();
+        try {
+            await createNotification({
+                userId: request.userId,
+                type: 'package',
+                level: 'danger',
+                title: 'Request deleted',
+                message: `Request for ${request.packageName} was deleted.`,
+                data: { requestId: request._id.toString(), view: 'packages', action: 'deleted' }
+            });
+        } catch (notifyError) {
+            console.warn('Failed to create delete request notification', notifyError);
+        }
         return res.json({ message: 'Request deleted' });
     } catch (error) {
         return res.status(500).json({ message: 'Failed to delete request', error: error.message });
@@ -473,6 +549,33 @@ exports.createPackageRequestMessage = async (req, res) => {
         request.lastMessageAt = messageDoc.createdAt;
         request.lastMessagePreview = buildMessagePreview(body, attachments);
         await request.save();
+
+        try {
+            if (senderRole === 'admin') {
+                await createNotification({
+                    userId: request.userId,
+                    type: 'package',
+                    level: 'info',
+                    title: 'New request message',
+                    message: buildMessagePreview(body, attachments) || 'New message on your package request.',
+                    data: { requestId: request._id.toString(), view: 'packages', action: 'message' }
+                });
+            } else {
+                const adminUser = await User.findOne({ phone: ADMIN_PHONE });
+                if (adminUser?._id) {
+                    await createNotification({
+                        userId: adminUser._id,
+                        type: 'package',
+                        level: 'info',
+                        title: 'New request message',
+                        message: buildMessagePreview(body, attachments) || 'New package request message received.',
+                        data: { requestId: request._id.toString(), view: 'packages', action: 'message' }
+                    });
+                }
+            }
+        } catch (notifyError) {
+            console.warn('Failed to create request message notification', notifyError);
+        }
 
         return res.status(201).json({
             message: {

@@ -3,7 +3,8 @@ const User = require('../../infrastructure/models/user');
 const Ticket = require('../../infrastructure/models/ticket');
 const TicketMessage = require('../../infrastructure/models/ticketMessage');
 
-const { isAdminUser, isSupportUser } = require('../../utils/supportUsers');
+const { ADMIN_PHONE, isAdminUser, isSupportUser } = require('../../utils/supportUsers');
+const { createNotifications } = require('../../application/services/notification/notification.service');
 const PREVIEW_LIMIT = 140;
 
 const buildPreview = (text = '') => {
@@ -139,6 +140,33 @@ const registerTicketSocket = (io) => {
                 io.to(`user:${ticket.createdBy}`).emit('ticket:updated', ticketUpdate);
                 io.to('admin:all').emit('ticket:updated', ticketUpdate);
                 io.to('support:all').emit('ticket:updated', ticketUpdate);
+
+                try {
+                    const recipients = new Set();
+                    if (ticket.createdBy) recipients.add(ticket.createdBy.toString());
+                    if (ticket.assignedTo) recipients.add(ticket.assignedTo.toString());
+                    const adminUser = await User.findOne({ phone: ADMIN_PHONE });
+                    if (adminUser?._id) recipients.add(adminUser._id.toString());
+
+                    const senderId = socket.user?._id?.toString();
+                    if (senderId) recipients.delete(senderId);
+
+                    const preview = buildPreview(trimmedBody);
+                    await createNotifications({
+                        userIds: Array.from(recipients),
+                        type: 'ticket',
+                        level: 'info',
+                        title: 'New ticket message',
+                        message: preview ? `Ticket "${ticket.subject}": ${preview}` : `New message in "${ticket.subject}".`,
+                        data: {
+                            ticketId: ticket._id.toString(),
+                            view: 'tickets',
+                            action: 'message'
+                        }
+                    });
+                } catch (notifyError) {
+                    console.warn('Failed to create ticket message notifications', notifyError);
+                }
 
                 if (ack) ack({ ok: true, message: messagePayload });
             } catch (err) {

@@ -4,6 +4,7 @@ const Report = require("../../infrastructure/models/report");
 const ElrajhiReport = require("../../infrastructure/models/ElrajhiReport");
 const UrgentReport = require("../../infrastructure/models/UrgentReport");
 const path = require("path");
+const { createNotification } = require("../../application/services/notification/notification.service");
 
 
 const normalizeKey = (value = "") =>
@@ -302,6 +303,23 @@ exports.deleteDuplicateReport = async (req, res) => {
       return res.status(404).json({ success: false, message: "Report not found." });
     }
 
+    try {
+      await createNotification({
+        userId: req.user?.id,
+        type: "report",
+        level: "danger",
+        title: "Report deleted",
+        message: `Report ${reportId} was deleted.`,
+        data: {
+          reportId,
+          view: "duplicate-report",
+          action: "deleted"
+        }
+      });
+    } catch (notifyError) {
+      console.warn("Failed to create delete notification", notifyError);
+    }
+
     return res.json({ success: true });
   } catch (error) {
     console.error("Error deleting duplicate report:", error);
@@ -455,6 +473,23 @@ exports.createDuplicateReport = async (req, res) => {
     });
 
     await duplicateReport.save();
+
+    try {
+      await createNotification({
+        userId: user.id,
+        type: "report",
+        level: "success",
+        title: "Report stored",
+        message: `Report ${duplicateReport.report_id || duplicateReport._id.toString()} stored successfully.`,
+        data: {
+          reportId: duplicateReport._id.toString(),
+          view: "duplicate-report",
+          action: "created"
+        }
+      });
+    } catch (notifyError) {
+      console.warn("Failed to create report notification", notifyError);
+    }
 
     return res.status(201).json({
       success: true,

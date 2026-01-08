@@ -3,6 +3,7 @@ const TicketMessage = require('../../infrastructure/models/ticketMessage');
 const User = require('../../infrastructure/models/user');
 const { getSocketServer } = require('../sockets/socketRegistry');
 const { ADMIN_PHONE, SUPPORT_PHONES, isAdminUser, isSupportUser } = require('../../utils/supportUsers');
+const { createNotification, createNotifications } = require('../../application/services/notification/notification.service');
 const PREVIEW_LIMIT = 140;
 
 const buildPreview = (text = '') => {
@@ -141,6 +142,37 @@ exports.createTicket = async (req, res) => {
             io.to('admin:all').emit('ticket:created', payload);
             io.to('support:all').emit('ticket:created', payload);
             io.to(`user:${user._id}`).emit('ticket:created', payload);
+        }
+
+        try {
+            if (adminUser?._id) {
+                await createNotification({
+                    userId: adminUser._id,
+                    type: 'ticket',
+                    level: 'info',
+                    title: 'New ticket',
+                    message: `Ticket "${ticket.subject}" from ${user.phone || 'user'}.`,
+                    data: {
+                        ticketId: ticket._id.toString(),
+                        view: 'tickets',
+                        action: 'created'
+                    }
+                });
+            }
+            await createNotification({
+                userId: user._id,
+                type: 'ticket',
+                level: 'success',
+                title: 'Ticket created',
+                message: 'Your ticket has been sent to support.',
+                data: {
+                    ticketId: ticket._id.toString(),
+                    view: 'tickets',
+                    action: 'created'
+                }
+            });
+        } catch (notifyError) {
+            console.warn('Failed to create ticket notifications', notifyError);
         }
 
         return res.status(201).json({
@@ -335,6 +367,31 @@ exports.createMessage = async (req, res) => {
             });
         }
 
+        try {
+            const recipients = new Set();
+            if (ticket.createdBy) recipients.add(ticket.createdBy.toString());
+            if (ticket.assignedTo) recipients.add(ticket.assignedTo.toString());
+            const adminUser = await User.findOne({ phone: ADMIN_PHONE });
+            if (adminUser?._id) recipients.add(adminUser._id.toString());
+            recipients.delete(user._id.toString());
+
+            const preview = buildMessagePreview(body, attachments);
+            await createNotifications({
+                userIds: Array.from(recipients),
+                type: 'ticket',
+                level: 'info',
+                title: 'New ticket message',
+                message: preview ? `Ticket "${ticket.subject}": ${preview}` : `New message in "${ticket.subject}".`,
+                data: {
+                    ticketId: ticket._id.toString(),
+                    view: 'tickets',
+                    action: 'message'
+                }
+            });
+        } catch (notifyError) {
+            console.warn('Failed to create ticket message notifications', notifyError);
+        }
+
         return res.status(201).json({ message: messagePayload });
     } catch (err) {
         return res.status(500).json({ message: 'Failed to send message', error: err.message });
@@ -399,6 +456,35 @@ exports.assignTicket = async (req, res) => {
             io.to('support:all').emit('ticket:updated', updatePayload);
         }
 
+        try {
+            await createNotification({
+                userId: supportUser._id,
+                type: 'ticket',
+                level: 'info',
+                title: 'Ticket assigned',
+                message: `Ticket "${ticket.subject}" was assigned to you.`,
+                data: {
+                    ticketId: ticket._id.toString(),
+                    view: 'tickets',
+                    action: 'assigned'
+                }
+            });
+            await createNotification({
+                userId: ticket.createdBy?._id || ticket.createdBy,
+                type: 'ticket',
+                level: 'info',
+                title: 'Ticket assigned',
+                message: `Your ticket was assigned to ${supportUser.phone || 'support'}.`,
+                data: {
+                    ticketId: ticket._id.toString(),
+                    view: 'tickets',
+                    action: 'assigned'
+                }
+            });
+        } catch (notifyError) {
+            console.warn('Failed to create assignment notifications', notifyError);
+        }
+
         return res.json({ ticket });
     } catch (err) {
         return res.status(500).json({ message: 'Failed to assign ticket', error: err.message });
@@ -457,6 +543,23 @@ exports.takeTicket = async (req, res) => {
             io.to('support:all').emit('ticket:updated', updatePayload);
         }
 
+        try {
+            await createNotification({
+                userId: ticket.createdBy?._id || ticket.createdBy,
+                type: 'ticket',
+                level: 'info',
+                title: 'Support started',
+                message: `Support ${user.phone || 'user'} has taken your ticket.`,
+                data: {
+                    ticketId: ticket._id.toString(),
+                    view: 'tickets',
+                    action: 'taken'
+                }
+            });
+        } catch (notifyError) {
+            console.warn('Failed to create take-ticket notification', notifyError);
+        }
+
         return res.json({ ticket });
     } catch (err) {
         return res.status(500).json({ message: 'Failed to take ticket', error: err.message });
@@ -513,6 +616,24 @@ exports.updateTicketStatus = async (req, res) => {
             io.to(`user:${ticket.createdBy?._id || ticket.createdBy}`).emit('ticket:updated', updatePayload);
             io.to('admin:all').emit('ticket:updated', updatePayload);
             io.to('support:all').emit('ticket:updated', updatePayload);
+        }
+
+        try {
+            await createNotification({
+                userId: ticket.createdBy?._id || ticket.createdBy,
+                type: 'ticket',
+                level: 'info',
+                title: 'Ticket updated',
+                message: `Ticket status updated to ${ticket.status}.`,
+                data: {
+                    ticketId: ticket._id.toString(),
+                    status: ticket.status,
+                    view: 'tickets',
+                    action: 'status'
+                }
+            });
+        } catch (notifyError) {
+            console.warn('Failed to create status notification', notifyError);
         }
 
         return res.json({ ticket });

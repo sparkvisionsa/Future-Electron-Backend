@@ -5,6 +5,7 @@ const { addCommonFields } = require('../../application/services/report/addCommon
 const { checkMissingPagesUC } = require('../../application/services/report/checkMissingPages.uc');
 const { getReportsByUserIdUC } = require('../../application/services/report/getReportsByUserId.uc');
 const Report = require("../../infrastructure/models/report");
+const { createNotification } = require('../../application/services/notification/notification.service');
 
 const reportController = {
     async createReport(req, res) {
@@ -311,6 +312,22 @@ const reportController = {
             );
 
             if (success) {
+                try {
+                    await createNotification({
+                        userId,
+                        type: 'report',
+                        level: 'success',
+                        title: 'Report created',
+                        message: `Report ${reportId.trim()} created successfully.`,
+                        data: {
+                            reportId: reportId.trim(),
+                            view: 'upload-assets',
+                            action: 'created'
+                        }
+                    });
+                } catch (notifyError) {
+                    console.warn('Failed to create report notification', notifyError);
+                }
                 return res.status(200).json({
                     success,
                     message,
@@ -329,6 +346,27 @@ const reportController = {
 
         } catch (error) {
             console.error('[createReportWithCommonFields] Error:', error);
+            try {
+                if (req.userId) {
+                    const failedId = String(req.body?.reportId || '').trim();
+                    await createNotification({
+                        userId: req.userId,
+                        type: 'report',
+                        level: 'danger',
+                        title: 'Report failed',
+                        message: failedId
+                            ? `Report ${failedId} failed to upload.`
+                            : 'Report upload failed.',
+                        data: {
+                            reportId: failedId || undefined,
+                            view: 'upload-assets',
+                            action: 'failed'
+                        }
+                    });
+                }
+            } catch (notifyError) {
+                console.warn('Failed to create report failure notification', notifyError);
+            }
             return res.status(500).json({
                 success: false,
                 message: `Internal server error: ${error.message}`

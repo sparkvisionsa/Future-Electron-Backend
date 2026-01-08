@@ -4,6 +4,7 @@ const fs = require("fs");
 const dummyPdfPath = path.resolve("uploads/static/dummy_placeholder.pdf");
 
 const SubmitReportsQuickly = require("../../infrastructure/models/SubmitReportsQuickly");
+const { createNotification } = require("../../application/services/notification/notification.service");
 
 // ------------ helpers ------------
 
@@ -604,6 +605,23 @@ exports.deleteSubmitReportsQuickly = async (req, res) => {
     }
 
     await report.deleteOne();
+
+    try {
+      await createNotification({
+        userId: req.user?.id || req.user?._id,
+        type: "report",
+        level: "danger",
+        title: "Report deleted",
+        message: `Report ${reportId} was deleted.`,
+        data: {
+          reportId,
+          view: "submit-reports-quickly",
+          action: "deleted"
+        }
+      });
+    } catch (notifyError) {
+      console.warn("Failed to create delete notification", notifyError);
+    }
 
     return res.json({ success: true });
   } catch (error) {

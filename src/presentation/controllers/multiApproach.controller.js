@@ -5,6 +5,7 @@ const dummyPdfPath = path.resolve("uploads/static/dummy_placeholder.pdf");
 
 
 const MultiApproachReport = require("../../infrastructure/models/MultiApproachReport");
+const { createNotification } = require("../../application/services/notification/notification.service");
 
 // ------------ helpers ------------
 
@@ -889,6 +890,23 @@ exports.deleteMultiApproachReport = async (req, res) => {
     }
 
     await report.deleteOne();
+
+    try {
+      await createNotification({
+        userId: req.user?.id || req.user?._id,
+        type: "report",
+        level: "danger",
+        title: "Report deleted",
+        message: `Report ${reportId} was deleted.`,
+        data: {
+          reportId,
+          view: "multi-excel-upload",
+          action: "deleted"
+        }
+      });
+    } catch (notifyError) {
+      console.warn("Failed to create delete notification", notifyError);
+    }
 
     return res.json({ success: true });
   } catch (error) {
