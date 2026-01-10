@@ -12,7 +12,7 @@ const userSchema = new mongoose.Schema({
     profileImagePath: { type: String, default: '' },
     profileImageFileId: { type: mongoose.Schema.Types.ObjectId, ref: 'StoredFile', default: null },
     taqeem: {
-        username: { type: String, index: true, required: true },
+        username: { type: String, index: true },
         password: { type: String },
         bootstrap_used: { type: Boolean, default: false },
     },
