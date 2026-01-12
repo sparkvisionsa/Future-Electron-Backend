@@ -32,7 +32,7 @@ const reportSchema = new mongoose.Schema({
   has_other_users: { type: Boolean, default: false },
   report_users: { type: [String], default: [] },
   valuers: { type: [valuerSchema] },
-  report_status: { type: String, default: "INCOMPLETE" },
+  report_status: { type: String, default: "NEW" },
 
   startSubmitTime: { type: Date },
   endSubmitTime: { type: Date },
