@@ -56,6 +56,7 @@ const AssetSchema = new mongoose.Schema(
 
 const MultiApproachReportSchema = new mongoose.Schema(
   {
+     user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     batchId: {
       type: String,
       required: true,

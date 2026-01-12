@@ -15,8 +15,8 @@ const ticketRoutes = require("../routes/ticket.routes");
 const notificationRoutes = require("../routes/notification.routes");
 const filesRoutes = require("../routes/files.routes");
 
-
-
+// ✅ NEW
+const reportLookupRoutes = require("../routes/reportLookup.route");
 
 const router = express.Router();
 
@@ -27,8 +27,10 @@ router.use('/system', systemRoutes);
 router.use('/updates', updateRoutes);
 router.use('/companies', companyRoutes);
 router.use('/companes', companesRoutes);
+
+// NOTE: you had this twice; keep one
 router.use("/upload", uploadRoute);
-router.use("/upload", uploadRoute);
+
 router.use("/elrajhi-upload", elrajhiUploadRoute);
 router.use("/duplicate-report", duplicateReportRoutes);
 router.use("/multi-approach", multiApproachRoutes);
@@ -36,6 +38,9 @@ router.use("/submit-reports-quickly", submitReportsQuicklyRoutes);
 router.use("/tickets", ticketRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/files', filesRoutes);
+
+// ✅ NEW endpoint group
+router.use('/report-lookup', reportLookupRoutes);
 
 router.get('/health', (req, res) => res.json({ ok: true }));
 
