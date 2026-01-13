@@ -2,6 +2,7 @@
 const xlsx = require("xlsx");
 const path = require("path");
 const fs = require("fs");
+const mongoose = require("mongoose");
 
 const UrgentReport = require("../../infrastructure/models/UrgentReport");
 
@@ -15,6 +16,62 @@ function normalizeKey(str) {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+const safeString = (value) => (value === undefined || value === null ? "" : String(value));
+
+const toNumber = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : undefined;
+};
+
+const normalizeDateForUpdate = (value) => {
+  if (value === undefined) return undefined;
+  const raw = safeString(value).trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const parsed = new Date(raw);
+  if (isNaN(parsed.getTime())) return raw;
+  return parsed.toISOString().slice(0, 10);
+};
+
+const cleanValuersPayload = (rawValuers) => {
+  if (!rawValuers) return undefined;
+
+  let valuers = rawValuers;
+  if (typeof rawValuers === "string") {
+    try {
+      valuers = JSON.parse(rawValuers);
+    } catch (err) {
+      console.warn("Failed to parse valuers payload", err);
+      return undefined;
+    }
+  }
+
+  if (!Array.isArray(valuers)) return undefined;
+
+  const cleaned = valuers
+    .map((valuer) => {
+      const id = safeString(valuer?.valuerId || valuer?.valuer_id || valuer?.id).trim();
+      const name = safeString(valuer?.valuerName || valuer?.valuer_name || valuer?.name).trim();
+      const pct = toNumber(
+        valuer?.percentage ??
+        valuer?.contribution_percentage ??
+        valuer?.pct ??
+        valuer?.percent
+      );
+
+      return {
+        valuerId: id,
+        valuerName: name,
+        percentage: pct ?? 0,
+      };
+    })
+    .filter((v) => v.valuerId || v.valuerName || Number.isFinite(v.percentage));
+
+  return cleaned.length ? cleaned : [];
+};
 
 function getPlaceholderPdfPath() {
   const preferredPath = path.resolve(
@@ -763,6 +820,116 @@ exports.getElrajhiBatchReports = async (req, res) => {
   }
 };
 
+exports.updateElrajhiReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    if (!reportId) {
+      return res.status(400).json({
+        status: "failed",
+        error: "reportId is required",
+      });
+    }
+
+    const isMongoId = mongoose.Types.ObjectId.isValid(reportId);
+    const query = isMongoId
+      ? { $or: [{ report_id: reportId }, { _id: reportId }] }
+      : { report_id: reportId };
+
+    const report = await UrgentReport.findOne(query);
+
+    if (!report) {
+      return res.status(404).json({
+        status: "failed",
+        error: "Report not found",
+      });
+    }
+
+    const body = req.body || {};
+    const updates = {};
+
+    const setField = (field, value, transform) => {
+      if (value === undefined) return;
+      const nextValue = typeof transform === "function" ? transform(value) : value;
+      if (nextValue !== undefined) {
+        updates[field] = nextValue;
+      }
+    };
+
+    setField("report_id", body.report_id, (val) => {
+      const trimmed = safeString(val).trim();
+      return trimmed ? trimmed : undefined;
+    });
+    setField("title", body.title);
+    setField("source_excel_name", body.source_excel_name);
+    setField("batch_id", body.batch_id);
+    setField("client_name", body.client_name);
+    setField("purpose_id", body.purpose_id, toNumber);
+    setField("value_premise_id", body.value_premise_id, toNumber);
+    setField("report_type", body.report_type);
+    setField("valued_at", body.valued_at, normalizeDateForUpdate);
+    setField("submitted_at", body.submitted_at, normalizeDateForUpdate);
+    setField("inspection_date", body.inspection_date, normalizeDateForUpdate);
+    setField("assumptions", body.assumptions, toNumber);
+    setField("special_assumptions", body.special_assumptions, toNumber);
+    setField("number_of_macros", body.number_of_macros, toNumber);
+    setField("telephone", body.telephone);
+    setField("email", body.email, (val) => safeString(val).toLowerCase());
+    setField("final_value", body.final_value ?? body.value, toNumber);
+    setField("region", body.region);
+    setField("city", body.city);
+    setField("asset_id", body.asset_id, toNumber);
+    setField("asset_name", body.asset_name);
+    setField("asset_usage", body.asset_usage);
+    setField("valuation_currency", body.valuation_currency);
+    setField("report_status", body.report_status, (val) => safeString(val).toUpperCase());
+
+    if (body.submit_state !== undefined) {
+      const submitState = toNumber(body.submit_state);
+      if (submitState !== undefined) {
+        updates.submit_state = submitState;
+      }
+    }
+
+    if (body.last_checked_at) {
+      const ts = new Date(body.last_checked_at);
+      if (!isNaN(ts.getTime())) {
+        updates.last_checked_at = ts;
+      }
+    }
+
+    const cleanedValuers = cleanValuersPayload(body.valuers);
+    if (cleanedValuers) {
+      updates.valuers = cleanedValuers;
+    }
+
+    const uploadedPdfPath =
+      (req.file && req.file.path) ||
+      (req.files?.pdf && req.files.pdf[0]?.path) ||
+      (req.files?.pdfs && req.files.pdfs[0]?.path);
+
+    if (uploadedPdfPath) {
+      updates.pdf_path = path.resolve(uploadedPdfPath);
+    } else if (body.pdf_path !== undefined) {
+      updates.pdf_path = body.pdf_path;
+    }
+
+    Object.assign(report, updates);
+    await report.save();
+
+    return res.json({
+      status: "success",
+      message: "Report updated successfully",
+      report: report.toObject(),
+    });
+  } catch (err) {
+    console.error("Update Elrajhi report error:", err);
+    return res.status(500).json({
+      status: "failed",
+      error: err.message || "Failed to update report",
+    });
+  }
+};
+
 exports.getReportById = async (req, res) => {
   try {
     const { reportId } = req.params;
@@ -773,8 +940,12 @@ exports.getReportById = async (req, res) => {
       });
     }
 
-    const report = await UrgentReport.findOne({ report_id: reportId })
-      .lean();
+    const isMongoId = mongoose.Types.ObjectId.isValid(reportId);
+    const query = isMongoId
+      ? { $or: [{ report_id: reportId }, { _id: reportId }] }
+      : { report_id: reportId };
+
+    const report = await UrgentReport.findOne(query).lean();
 
     if (!report) {
       return res.status(404).json({
