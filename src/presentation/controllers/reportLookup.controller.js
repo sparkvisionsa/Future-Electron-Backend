@@ -21,9 +21,66 @@ function normalizeReport(doc, source) {
   };
 }
 
-async function lookupReportByReportId(req, res) {
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSmartOr(q) {
+  // numeric? also match exact numbers
+  const maybeNumber = Number(q);
+  const isNumber = !Number.isNaN(maybeNumber);
+
+  const rx = new RegExp(escapeRegex(q), "i");
+
+  // ✅ put your most-used fields here
+  // top-level
+  const OR = [
+    { report_id: rx },
+    { title: rx },
+
+    // common nested (raw)
+    { "client_name": rx },
+    { "raw.client_name": rx },
+    { "raw.title": rx },
+    { "raw.report_title": rx },
+    { "raw.name": rx },
+
+    { "raw.batch_id": rx },
+    { "raw.source_excel_name": rx },
+
+    { "raw.asset_name": rx },
+    { "raw.asset_id": rx },
+    { "raw.asset_usage": rx },
+    { "raw.region": rx },
+    { "raw.city": rx },
+
+    { "raw.email": rx },
+    { "raw.telephone": rx },
+
+    { "raw.report_status": rx },
+    { "raw.submit_state": rx },
+
+    // file/path
+    { "raw.pdf_path": rx },
+  ];
+
+  // If query looks like a number, also match numeric fields exactly
+  if (isNumber) {
+    OR.push(
+      { "raw.asset_id": maybeNumber },
+      { "raw.purpose_id": maybeNumber },
+      { "raw.value_premise_id": maybeNumber },
+      { "raw.submit_state": maybeNumber },
+      { "raw.final_value": maybeNumber }
+    );
+  }
+
+  return OR;
+}
+
+async function searchReports(req, res) {
   try {
-    const userIdStr = req.userId; // ✅ from your middleware
+    const userIdStr = String(req.userId || "").trim();
 
     if (!userIdStr || !mongoose.Types.ObjectId.isValid(userIdStr)) {
       return res.status(401).json({ status: "failed", error: "Unauthorized" });
@@ -31,37 +88,70 @@ async function lookupReportByReportId(req, res) {
 
     const userObjectId = new mongoose.Types.ObjectId(userIdStr);
 
-    const reportId = String(req.query.report_id || "").trim();
-    if (!reportId) {
-      return res.status(400).json({ status: "failed", error: "report_id is required" });
+    const q = String(req.query.q || "").trim();
+    if (!q) {
+      return res.status(400).json({ status: "failed", error: "q is required" });
     }
+
+    const limit = Math.min(Number(req.query.limit) || 20, 100);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const skip = (page - 1) * limit;
+
+    // optional source filter
+    const source = String(req.query.source || "ALL").trim();
 
     const sources = [
-      { name: "DuplicateReport", model: DuplicateReport, idKey: "report_id" },
-      { name: "ElrajhiReport", model: ElrajhiReport, idKey: "report_id" },
-      { name: "MultiApproachReport", model: MultiApproachReport, idKey: "report_id" },
-      { name: "SubmitReportsQuickly", model: SubmitReportsQuickly, idKey: "report_id" },
-      { name: "UrgentReport", model: UrgentReport, idKey: "report_id" },
-      { name: "Reports", model: Reports, idKey: "report_id" },
-    ];
+      { name: "DuplicateReport", model: DuplicateReport },
+      { name: "ElrajhiReport", model: ElrajhiReport },
+      { name: "MultiApproachReport", model: MultiApproachReport },
+      { name: "SubmitReportsQuickly", model: SubmitReportsQuickly },
+      { name: "UrgentReport", model: UrgentReport },
+      { name: "Reports", model: Reports },
+    ].filter((s) => source === "ALL" || s.name === source);
 
-    for (const s of sources) {
-      const doc = await s.model
-        .findOne({ [s.idKey]: reportId, user_id: userObjectId })
-        .lean()
-        .exec();
+    const or = buildSmartOr(q);
 
-      if (doc) {
-        return res.json({ status: "success", data: normalizeReport(doc, s.name) });
-      }
-    }
+    // ✅ We query each collection and then merge/sort globally
+    // For performance: pull more than needed from each source, then slice
+    const perSourceLimit = Math.ceil(limit / Math.max(1, sources.length)) + 20;
 
-    return res.status(404).json({
-      status: "failed",
-      error: "Report not found for this user in any collection",
+    const results = await Promise.all(
+      sources.map(async (s) => {
+        const docs = await s.model
+          .find({
+            user_id: userObjectId,
+            $or: or,
+          })
+          .sort({ createdAt: -1 })
+          .limit(perSourceLimit)
+          .lean()
+          .exec();
+
+        return docs.map((d) => normalizeReport(d, s.name));
+      })
+    );
+
+    const merged = results.flat();
+
+    // global sort by createdAt/updatedAt fallback
+    merged.sort((a, b) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : (a.updatedAt ? new Date(a.updatedAt).getTime() : 0);
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : (b.updatedAt ? new Date(b.updatedAt).getTime() : 0);
+      return tb - ta;
+    });
+
+    const paged = merged.slice(skip, skip + limit);
+
+    return res.json({
+      status: "success",
+      q,
+      page,
+      limit,
+      totalApprox: merged.length, // (approx because we didn't count all DB matches)
+      data: paged,
     });
   } catch (err) {
-    console.error("lookupReportByReportId error:", err);
+    console.error("searchReports error:", err);
     return res.status(500).json({ status: "failed", error: err.message || "Server error" });
   }
 }
@@ -221,6 +311,6 @@ async function listMyReports(req, res) {
 
 
 module.exports = {
-  lookupReportByReportId,
+  searchReports,
   listMyReports,
 };

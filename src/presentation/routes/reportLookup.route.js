@@ -4,13 +4,13 @@ const router = express.Router();
 const auth = require("../middleware/auth.middleware"); // ✅ same middleware you shared
 
 const {
-  lookupReportByReportId,
+  searchReports,
   listMyReports,
 } = require("../controllers/reportLookup.controller");
 
 // 🔍 Find report + know which collection it belongs to
-// GET /api/report-lookup/lookup?report_id=1598923
-router.get("/lookup", auth, lookupReportByReportId);
+// GET /api/report-lookup/search?q=1598923&page=1&limit=20&source=ALL
+router.get("/search", auth, searchReports);
 
 // 📄 List all reports of logged-in user across collections
 // GET /api/report-lookup/mine?limit=20&page=1
