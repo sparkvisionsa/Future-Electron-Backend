@@ -116,7 +116,7 @@ const AssetSchema = new mongoose.Schema(
 
 const SubmitReportsQuicklySchema = new mongoose.Schema(
   {
-    user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    user_id: { type: String, ref: "User" },
     user_phone: { type: String },
     company: { type: mongoose.Schema.Types.ObjectId, ref: "Company", default: null },
     report_id: { type: String, default: "" },

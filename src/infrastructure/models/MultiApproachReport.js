@@ -17,9 +17,9 @@ const AssetSchema = new mongoose.Schema(
     asset_type: { type: String, default: "0" },
 
     // Repeated high-level fields (copied from parent report)
-    region: { type: String , required: true},
-    city: { type: String , required: true},
-    inspection_date: { type: String , required:true }, // yyyy-mm-dd
+    region: { type: String, required: true },
+    city: { type: String, required: true },
+    inspection_date: { type: String, required: true }, // yyyy-mm-dd
     owner_name: { type: String, required: true },
 
     source_sheet: {
@@ -65,6 +65,7 @@ const MultiApproachReportSchema = new mongoose.Schema(
 
     excel_name: { type: String, required: true },
     excel_basename: { type: String, required: true },
+    user_id: { type: String, required: true },
 
     // Report Info (flattened important fields)
     title: { type: String },

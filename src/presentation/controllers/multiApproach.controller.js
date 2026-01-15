@@ -241,10 +241,10 @@ exports.processMultiApproachBatch = async (req, res) => {
 
 
     excelMap.forEach((value, baseName) => {
-  if (value.pdfs.length === 0) {
-    value.pdfs.push(dummyPdfPath);
-  }
-});
+      if (value.pdfs.length === 0) {
+        value.pdfs.push(dummyPdfPath);
+      }
+    });
 
 
     // Also ensure every Excel has at least one PDF (if that's required)
@@ -515,6 +515,7 @@ exports.processMultiApproachBatch = async (req, res) => {
       // 3.4 Build document for this Excel
       docsToInsert.push({
         batchId,
+        user_id: req.user?.id,
         excel_name: file.originalname,
         excel_basename: baseName,
         owner_name,
@@ -737,6 +738,7 @@ exports.createManualMultiApproachReport = async (req, res) => {
 
     const doc = {
       batchId,
+      user_id: req.user?.id,
       excel_name,
       excel_basename,
       title: manualTitle,
@@ -781,26 +783,26 @@ exports.createManualMultiApproachReport = async (req, res) => {
       reports: [created],
     });
   } catch (err) {
-  console.error("Multi-approach batch upload error:", err);
+    console.error("Multi-approach batch upload error:", err);
 
-  if (err.name === "ValidationError") {
-    // Collect all field-specific messages
-    const messages = Object.values(err.errors).map((e) => e.message);
+    if (err.name === "ValidationError") {
+      // Collect all field-specific messages
+      const messages = Object.values(err.errors).map((e) => e.message);
 
-    return res.status(400).json({
+      return res.status(400).json({
+        status: "failed",
+        error: messages.join("Date Validation Error: Date of Valuation must be on or before Report Issuing Date"),
+      });
+    }
+
+    const statusCode =
+      err?.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
+
+    return res.status(statusCode).json({
       status: "failed",
-      error: messages.join("Date Validation Error: Date of Valuation must be on or before Report Issuing Date"),
+      error: err?.message || "Unexpected error",
     });
   }
-
-  const statusCode =
-    err?.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
-
-  return res.status(statusCode).json({
-    status: "failed",
-    error: err?.message || "Unexpected error",
-  });
-}
 
 };
 
@@ -819,6 +821,73 @@ exports.listMultiApproachReports = async (req, res) => {
   } catch (error) {
     console.error("Error listing multi-approach reports:", error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getMultiApproachReportsByUserId = async (req, res) => {
+  try {
+    const user_id = req.user.id;
+
+    if (!user_id) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    // Get pagination parameters from query
+    const limit = Math.min(Number(req.query.limit) || 10, 100);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const skip = (page - 1) * limit;
+
+    // Get filter parameter (optional)
+    const status = req.query.status;
+
+    // Build query based on filters
+    let query = { user_id };
+
+    // Add status filter if provided
+    if (status && status !== 'all') {
+      if (status === 'approved') {
+        query.checked = true;
+      } else if (status === 'sent') {
+        query.report_id = { $exists: true, $ne: null };
+      } else if (status === 'complete') {
+        query.endSubmitTime = { $exists: true };
+      } else if (status === 'incomplete') {
+        query.report_id = { $exists: false };
+        query.endSubmitTime = { $exists: false };
+        query.checked = { $ne: true };
+      }
+    }
+
+    const [reports, total] = await Promise.all([
+      MultiApproachReport.find(query)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      MultiApproachReport.countDocuments(query),
+    ]);
+
+    return res.json({
+      success: true,
+      reports,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching multi-approach reports by userId:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 

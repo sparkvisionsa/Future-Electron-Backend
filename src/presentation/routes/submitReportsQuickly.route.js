@@ -7,12 +7,14 @@ const {
   processSubmitReportsQuicklyBatch,
   listSubmitReportsQuickly,
   updateSubmitReportsQuickly,
+  getQuickReportsByUserId,
   deleteSubmitReportsQuickly,
   updateSubmitReportsQuicklyAsset,
   deleteSubmitReportsQuicklyAsset,
 } = require("../controllers/submitReportsQuickly.controller");
 
 router.get("/", authMiddleware, listSubmitReportsQuickly);
+router.get("/user", authMiddleware, getQuickReportsByUserId);
 router.patch("/:id", authMiddleware, updateSubmitReportsQuickly);
 router.delete("/:id", authMiddleware, deleteSubmitReportsQuickly);
 router.patch("/:id/assets/:index", authMiddleware, updateSubmitReportsQuicklyAsset);
@@ -26,6 +28,7 @@ router.post(
     console.log("📥 API HIT: POST /api/submit-reports-quickly");
     next();
   },
+  authMiddleware,
   upload.fields([
     { name: "excels", maxCount: 50 }, // multiple excel files
     { name: "pdfs", maxCount: 500 },  // multiple pdf files

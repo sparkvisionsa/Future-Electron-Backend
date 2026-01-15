@@ -119,13 +119,13 @@ function toSafeBasename(value, fallback) {
 function extractValuersFromRow(row) {
   const valuers = [];
   const keys = Object.keys(row);
-  
+
   // Normalize key names (handle variations like "valuerName", "valuer_name", "valuer Name", etc.)
   const normalizeKey = (key) => {
     if (!key) return "";
     return String(key).toLowerCase().trim().replace(/[\s_]+/g, "");
   };
-  
+
   // Find all valuer-related columns
   const valuerColumns = {};
   keys.forEach(key => {
@@ -138,18 +138,18 @@ function extractValuersFromRow(row) {
       valuerColumns.percentage = key;
     }
   });
-  
+
   // If we have structured columns (valuerId, valuerName, percentage), extract them
   if (valuerColumns.id || valuerColumns.name || valuerColumns.percentage) {
     // Try to extract multiple valuers (valuerId1, valuerName1, percentage1, etc.)
     for (let i = 1; i <= 10; i++) {
-      const idKey = row[`valuerId${i}`] || row[`valuer_id${i}`] || row[`valuerId_${i}`] || 
-                    (i === 1 && (row.valuerId || row.valuer_id || row["valuerId"]));
+      const idKey = row[`valuerId${i}`] || row[`valuer_id${i}`] || row[`valuerId_${i}`] ||
+        (i === 1 && (row.valuerId || row.valuer_id || row["valuerId"]));
       const nameKey = row[`valuerName${i}`] || row[`valuer_name${i}`] || row[`valuerName_${i}`] ||
-                      (i === 1 && (row.valuerName || row.valuer_name || row["valuerName"]));
+        (i === 1 && (row.valuerName || row.valuer_name || row["valuerName"]));
       const pctKey = row[`percentage${i}`] || row[`percent${i}`] || row[`percentage_${i}`] ||
-                     (i === 1 && (row.percentage || row.percent || row["percentage"]));
-      
+        (i === 1 && (row.percentage || row.percent || row["percentage"]));
+
       if (nameKey) {
         const name = String(nameKey).trim();
         const pct = pctKey ? Number(pctKey) : 0;
@@ -159,21 +159,21 @@ function extractValuersFromRow(row) {
       }
     }
   }
-  
+
   // If no structured valuers found, try to find any valuer columns by pattern
   if (valuers.length === 0) {
     // Look for columns that might contain valuer data
     const valuerNameKeys = keys.filter(k => {
       const normalized = normalizeKey(k);
-      return normalized.includes("valuername") || normalized.includes("valuername") || 
-             normalized.includes("valuer") && normalized.includes("name");
+      return normalized.includes("valuername") || normalized.includes("valuername") ||
+        normalized.includes("valuer") && normalized.includes("name");
     });
-    
+
     const percentageKeys = keys.filter(k => {
       const normalized = normalizeKey(k);
       return normalized.includes("percentage") || normalized.includes("percent");
     });
-    
+
     // Try to match valuer names with percentages
     valuerNameKeys.forEach((nameKey, idx) => {
       const name = String(row[nameKey]).trim();
@@ -186,19 +186,19 @@ function extractValuersFromRow(row) {
       }
     });
   }
-  
+
   return valuers;
 }
 
 // Aggregate valuers from all rows (merge by name, sum percentages)
 function aggregateValuers(allValuers) {
   const valuerMap = new Map();
-  
+
   allValuers.forEach(valuer => {
     if (!valuer || !valuer.valuerName) return;
     const name = String(valuer.valuerName).trim();
     const pct = Number(valuer.percentage) || 0;
-    
+
     if (name && pct > 0) {
       if (valuerMap.has(name)) {
         valuerMap.set(name, valuerMap.get(name) + pct);
@@ -207,13 +207,13 @@ function aggregateValuers(allValuers) {
       }
     }
   });
-  
+
   // Convert to array and normalize percentages to sum to 100
   const valuers = Array.from(valuerMap.entries()).map(([name, totalPct]) => ({
     valuerName: name,
     percentage: totalPct
   }));
-  
+
   // Normalize to 100% if total is not 100
   const total = valuers.reduce((sum, v) => sum + v.percentage, 0);
   if (total > 0 && Math.abs(total - 100) > 0.01) {
@@ -221,7 +221,7 @@ function aggregateValuers(allValuers) {
       v.percentage = Math.round((v.percentage / total) * 100);
     });
   }
-  
+
   return valuers;
 }
 
@@ -240,6 +240,7 @@ exports.processSubmitReportsQuicklyBatch = async (req, res) => {
     const excelFiles = req.files.excels;
     const pdfFiles = req.files.pdfs || [];
     const skipPdfUpload = req.body.skipPdfUpload === 'true' || req.body.skipPdfUpload === true;
+    const user_id = req.user.id;
 
     // 1) Build maps by basename (without extension)
     const excelMap = new Map(); // basename -> { file, pdfs: [] }
@@ -322,7 +323,7 @@ exports.processSubmitReportsQuicklyBatch = async (req, res) => {
       marketRows.forEach((row, index) => {
         const assetName = row.asset_name || row["asset_name\n"] || row["Asset Name"];
         if (!assetName) return;
-        
+
         const asset_usage_id = Number(row.asset_usage_id || row["asset_usage_id\n"] || row["Asset Usage ID"] || 0);
         if (!asset_usage_id || asset_usage_id <= 0) {
           throw badRequest(
@@ -338,7 +339,7 @@ exports.processSubmitReportsQuicklyBatch = async (req, res) => {
             `Asset "${assetName}" has invalid final_value in market sheet. Must be a positive integer.`
           );
         }
-        
+
         assets_total_value += final_value;
 
         const inspection_date = formatDateYyyyMmDd(
@@ -468,7 +469,7 @@ exports.processSubmitReportsQuicklyBatch = async (req, res) => {
 
       // 3.6 Build document for this Excel
       docsToInsert.push({
-        user_id: req.user?._id || null,
+        user_id,
         user_phone: req.user?.phone || null,
         company: req.user?.company || null,
         batch_id: batchId,
@@ -537,6 +538,52 @@ exports.listSubmitReportsQuickly = async (req, res) => {
   } catch (error) {
     console.error("Error listing submit reports quickly:", error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getQuickReportsByUserId = async (req, res) => {
+  try {
+    console.log("user", req.user);
+    const user_id = req.user.id;
+
+    if (!user_id) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 10, 100); // Default 10, max 100
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const skip = (page - 1) * limit;
+
+    const [reports, total] = await Promise.all([
+      SubmitReportsQuickly.find({ user_id })
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(), // Add .lean() for better performance
+      SubmitReportsQuickly.countDocuments({ user_id }),
+    ]);
+
+    return res.json({
+      success: true,
+      reports,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching quick reports by userId:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 

@@ -7,6 +7,7 @@ const {
   processMultiApproachBatch,
   createManualMultiApproachReport,
   listMultiApproachReports,
+  getMultiApproachReportsByUserId,
   updateMultiApproachReport,
   deleteMultiApproachReport,
   updateMultiApproachAsset,
@@ -14,6 +15,7 @@ const {
 } = require("../controllers/multiApproach.controller");
 
 router.get("/", authMiddleware, listMultiApproachReports);
+router.get("/user", authMiddleware, getMultiApproachReportsByUserId);
 router.patch("/:id", authMiddleware, updateMultiApproachReport);
 router.delete("/:id", authMiddleware, deleteMultiApproachReport);
 router.patch("/:id/assets/:index", authMiddleware, updateMultiApproachAsset);
@@ -26,6 +28,7 @@ router.post(
     console.log("📥 API HIT: POST /api/upload-multi-approach");
     next();
   },
+  authMiddleware,
   upload.fields([
     { name: "excels", maxCount: 50 }, // multiple excel files
     { name: "pdfs", maxCount: 500 },  // multiple pdf files
