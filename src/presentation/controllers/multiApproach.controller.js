@@ -1015,6 +1015,9 @@ exports.updateMultiApproachAsset = async (req, res) => {
       }
     });
 
+    // Always set submitState to 0 when asset is edited
+    updates.submitState = 0;
+
     const normalized = asset?.toObject ? asset.toObject() : { ...asset };
     report.asset_data[assetIndex] = { ...normalized, ...updates };
     await report.save();
