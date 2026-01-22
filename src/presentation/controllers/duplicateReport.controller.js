@@ -200,23 +200,104 @@ exports.getLatestForUser = async (req, res) => {
   }
 };
 
+// exports.listReportsForUser = async (req, res) => {
+//   try {
+//     if (!req.user) {
+//       // commit
+//       return res.status(401).json({ success: false, message: "Unauthorized" });
+//     }
+//     const query = buildUserReportQuery(req.user);
+//     if (!query) {
+//       return res.status(401).json({ success: false, message: "User context missing." });
+//     }
+
+//     const limit = Math.min(Number(req.query.limit) || 200, 500);
+//     const reports = await DuplicateReport.find(query)
+//       .sort({ createdAt: -1, _id: -1 })
+//       .limit(limit);
+
+//     return res.json({ success: true, reports });
+//   } catch (error) {
+//     console.error("Error listing duplicate reports:", error);
+//     return res.status(500).json({ success: false, message: error.message });
+//   }
+// };
+
+
+
+
+
 exports.listReportsForUser = async (req, res) => {
   try {
     if (!req.user) {
-      // commit
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
-    const query = buildUserReportQuery(req.user);
-    if (!query) {
+
+    const baseQuery = buildUserReportQuery(req.user);
+    if (!baseQuery) {
       return res.status(401).json({ success: false, message: "User context missing." });
     }
 
-    const limit = Math.min(Number(req.query.limit) || 200, 500);
-    const reports = await DuplicateReport.find(query)
-      .sort({ createdAt: -1, _id: -1 })
-      .limit(limit);
+    // -------- pagination params --------
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limitRaw = parseInt(req.query.limit, 10) || 10;
+    const limit = Math.min(Math.max(limitRaw, 1), 200); // cap to protect server
+    const skip = (page - 1) * limit;
 
-    return res.json({ success: true, reports });
+    // -------- status filter (matches frontend getReportStatus) --------
+    // getReportStatus:
+    //  - approved: checked === true
+    //  - complete: endSubmitTime exists
+    //  - sent: report_id exists
+    //  - incomplete: otherwise
+    const status = String(req.query.status || "all").toLowerCase();
+
+    const query = { ...baseQuery };
+
+    if (status !== "all") {
+      if (status === "approved") {
+        query.checked = true;
+      } else if (status === "complete") {
+        query.checked = { $ne: true };
+        query.endSubmitTime = { $exists: true, $ne: null };
+      } else if (status === "sent") {
+        query.checked = { $ne: true };
+        query.endSubmitTime = { $exists: false };
+        query.report_id = { $exists: true, $ne: "" };
+      } else if (status === "incomplete") {
+        query.checked = { $ne: true };
+        query.endSubmitTime = { $exists: false };
+        query.$or = [
+          { report_id: { $exists: false } },
+          { report_id: "" },
+          { report_id: null },
+        ];
+      }
+    }
+
+    // -------- sort latest first --------
+    const sort = { createdAt: -1, _id: -1 };
+
+    // -------- fetch + count in parallel --------
+    const [reports, total] = await Promise.all([
+      DuplicateReport.find(query).sort(sort).skip(skip).limit(limit),
+      DuplicateReport.countDocuments(query),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    return res.json({
+      success: true,
+      reports,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasPrev: page > 1,
+        hasNext: page < totalPages,
+      },
+    });
   } catch (error) {
     console.error("Error listing duplicate reports:", error);
     return res.status(500).json({ success: false, message: error.message });
@@ -409,39 +490,79 @@ exports.deleteDuplicateReportAsset = async (req, res) => {
   }
 };
 
+
 exports.createDuplicateReport = async (req, res) => {
   try {
-    const user = req.user || {}; 
+    const fs = require("fs");
+
+    const user = req.user || {};
     if (!user.id && !user.phone) {
-      return res.status(401).json({ success: false, message: "User context missing." });
+      return res
+        .status(401)
+        .json({ success: false, message: "User context missing." });
     }
 
+    // excel is REQUIRED
     const excelPath = req.files?.excel?.[0]?.path;
     if (!excelPath) {
-      return res.status(400).json({ success: false, message: "Excel file is required." });
+      return res
+        .status(400)
+        .json({ success: false, message: "Excel file is required." });
     }
 
+    /**
+     * pdf is OPTIONAL from frontend:
+     * - if provided => use uploaded pdf path
+     * - if not provided => use dummy pdf at uploads/static/dummy_placeholder.pdf
+     */
     const pdfFile = req.files?.pdf?.[0];
-    const pdfPath = pdfFile ? path.resolve(pdfFile.path) : "";
+
+    // IMPORTANT: use your requested path: \uploads\static\dummy_placeholder.pdf
+    // Using process.cwd() so it resolves from project root regardless of OS.
+    const dummyPdfPath = path.resolve(
+      process.cwd(),
+      "uploads",
+      "static",
+      "dummy_placeholder.pdf"
+    );
+
+    // If user didn't upload pdf, fallback to dummy
+    if (!pdfFile && !fs.existsSync(dummyPdfPath)) {
+      return res.status(500).json({
+        success: false,
+        message:
+          'Dummy PDF not found on server at "uploads/static/dummy_placeholder.pdf".',
+      });
+    }
+
+    // Decide final pdf path (real upload OR dummy)
+    const pdfPath = pdfFile ? path.resolve(pdfFile.path) : dummyPdfPath;
 
     console.log("pdfPath", pdfPath, "pdfFile", pdfFile);
 
+    // Parse formData JSON if provided
     let payload = req.body || {};
     if (payload.formData) {
       try {
         payload = JSON.parse(payload.formData);
       } catch (err) {
-        return res.status(400).json({ success: false, message: "Invalid formData payload." });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid formData payload." });
       }
     }
 
+    // Build assets from excel
     const assets = extractAssetsFromExcel(excelPath, {
       owner_name: payload.client_name || payload.owner_name || "",
       inspection_date: payload.inspection_date || "",
     });
 
     if (!assets.length) {
-      return res.status(400).json({ success: false, message: "No assets found in provided excel file." });
+      return res.status(400).json({
+        success: false,
+        message: "No assets found in provided excel file.",
+      });
     }
 
     const valuers = sanitizeValuers(payload.valuers);
@@ -450,6 +571,7 @@ exports.createDuplicateReport = async (req, res) => {
       user_id: user.id,
       user_phone: user.phone,
       company: user.company || null,
+
       report_id: payload.report_id || payload.reportId || "",
       title: payload.title || "",
       purpose_id: payload.purpose_id || "to set",
@@ -462,13 +584,19 @@ exports.createDuplicateReport = async (req, res) => {
       value: payload.value || "",
       valuation_currency: payload.valuation_currency || "to set",
       owner_name: payload.owner_name || "",
+
+      // ✅ ALWAYS set pdf_path:
+      // - real uploaded pdf path if provided
+      // - dummy placeholder path if not provided
       pdf_path: pdfPath,
+
       client_name: payload.client_name || "",
       telephone: payload.telephone || payload.phone || user.phone || "",
       email: payload.email || "",
       has_other_users: toBool(payload.has_other_users),
       report_users: cleanArray(payload.report_users),
       valuers,
+
       startSubmitTime: new Date(),
       asset_data: assets,
     });
@@ -481,12 +609,14 @@ exports.createDuplicateReport = async (req, res) => {
         type: "report",
         level: "success",
         title: "Report stored",
-        message: `Report ${duplicateReport.report_id || duplicateReport._id.toString()} stored successfully.`,
+        message: `Report ${
+          duplicateReport.report_id || duplicateReport._id.toString()
+        } stored successfully.`,
         data: {
           reportId: duplicateReport._id.toString(),
           view: "duplicate-report",
-          action: "created"
-        }
+          action: "created",
+        },
       });
     } catch (notifyError) {
       console.warn("Failed to create report notification", notifyError);
