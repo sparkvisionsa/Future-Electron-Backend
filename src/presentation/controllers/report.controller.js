@@ -345,7 +345,7 @@ const reportController = {
                     message,
                     data: {
                         ...data,
-                        recordCount: enhancedReportData.length
+                        recordCount: enhancedReportData.length,
                     }
                 });
             }
