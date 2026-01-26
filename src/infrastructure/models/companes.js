@@ -8,7 +8,16 @@ const companesSchema = new mongoose.Schema(
         user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
         url: { type: String, default: '' },
         officeId: { type: String },
-        sectorId: { type: String }
+        sectorId: { type: String },
+        valuers: {
+            type: [
+                {
+                    valuerId: { type: String },
+                    valuerName: { type: String }
+                }
+            ],
+            default: []
+        }
     },
     {
         timestamps: true,

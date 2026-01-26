@@ -7,6 +7,16 @@ const normalizeType = (t = '') => {
     return 'equipment';
 };
 
+const normalizeValuers = (list = []) => {
+    if (!Array.isArray(list)) return [];
+    return list
+        .map((valuer) => ({
+            valuerId: (valuer?.valuerId || valuer?.valuer_id || valuer?.id || '').toString().trim(),
+            valuerName: (valuer?.valuerName || valuer?.valuer_name || valuer?.name || valuer?.label || '').toString().trim(),
+        }))
+        .filter((v) => v.valuerId || v.valuerName);
+};
+
 exports.syncCompanies = async (req, res) => {
     try {
         const phone = req.user?.phone || req.body?.phone;
@@ -31,6 +41,10 @@ exports.syncCompanies = async (req, res) => {
                     officeId: company.officeId || company.office_id || null,
                     sectorId: company.sectorId || company.sector_id || null
                 };
+
+                if (Array.isArray(company.valuers)) {
+                    payload.valuers = normalizeValuers(company.valuers);
+                }
 
                 return Companes.findOneAndUpdate(
                     { phone, name: payload.name, type: payload.type },

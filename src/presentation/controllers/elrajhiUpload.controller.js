@@ -451,6 +451,28 @@ exports.processElrajhiExcel = async (req, res) => {
       });
     }
 
+    const selectedValuers = cleanValuersPayload(req.body?.valuers);
+    const hasSelectedValuers = Array.isArray(selectedValuers) && selectedValuers.length > 0;
+
+    if (hasSelectedValuers) {
+      const totalPct = selectedValuers.reduce(
+        (sum, v) => sum + (Number(v.percentage) || 0),
+        0
+      );
+      const roundedTotal = Math.round(totalPct * 100) / 100;
+      if (Math.abs(roundedTotal - 100) > 0.001) {
+        return res.status(400).json({
+          status: "failed",
+          error: `Selected valuers must total 100%. Currently ${roundedTotal}%.`,
+        });
+      }
+    } else if (!valuerCols.hasValuerColumns) {
+      return res.status(400).json({
+        status: "failed",
+        error: "Valuers are required. Select valuers from Taqeem before sending.",
+      });
+    }
+
     // 4) Build pdfMap from uploaded PDFs (with mojibake fix)
     const pdfMap = {};
     pdfFiles.forEach((file) => {
@@ -511,10 +533,14 @@ exports.processElrajhiExcel = async (req, res) => {
           return value !== null && value !== undefined && String(value).trim() !== "";
         });
 
-      // Build valuers[] for this asset only when valuer data exists on the row.
-      const valuers = hasValuerData ? buildValuersForAsset(assetRow, valuerCols) : [];
+      // Build valuers[] for this asset from selected valuers or Excel (if provided).
+      const valuers = hasSelectedValuers
+        ? selectedValuers.map((v) => ({ ...v }))
+        : hasValuerData
+          ? buildValuersForAsset(assetRow, valuerCols)
+          : [];
 
-      if (hasValuerData) {
+      if (!hasSelectedValuers && hasValuerData) {
         const totalPct = valuers.reduce(
           (sum, v) => sum + (Number(v.percentage) || 0),
           0
