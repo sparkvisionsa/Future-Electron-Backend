@@ -3,10 +3,9 @@ const http = require("http");
 const { Server } = require("socket.io");
 const app = require("./app");
 const { connect } = require("./infrastructure/connect");
-const registerTicketSocket = require("./presentation/sockets/ticket.socket");
 const { setSocketServer } = require("./presentation/sockets/socketRegistry");
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 async function main() {
   await connect();
@@ -20,13 +19,12 @@ async function main() {
   });
 
   setSocketServer(io);
-  registerTicketSocket(io);
 
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server listening on port ${PORT}`);
+    console.log(`Server listening on http://localhost:${PORT}`);
   });
-  server.keepAliveTimeout = 60000; // 60 seconds
-  server.headersTimeout = 65000; // must be > keepAliveTimeout
+  server.keepAliveTimeout = 60000;
+  server.headersTimeout = 65000;
 }
 
 main().catch((err) => {

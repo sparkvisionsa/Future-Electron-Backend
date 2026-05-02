@@ -1,14 +1,9 @@
 const SystemState = require('../../infrastructure/models/systemState');
 const User = require('../../infrastructure/models/user');
 const Company = require('../../infrastructure/models/company');
-const PackageModel = require('../../infrastructure/models/package');
-const Subscription = require('../../infrastructure/models/subscription');
 const SystemUpdate = require('../../infrastructure/models/systemUpdate');
-const Report = require('../../infrastructure/models/report');
+const SubmitReportsQuickly = require('../../infrastructure/models/SubmitReportsQuickly');
 const UrgentReport = require('../../infrastructure/models/UrgentReport');
-const DuplicateReport = require('../../infrastructure/models/DuplicateReport');
-const MultiApproachReport = require('../../infrastructure/models/MultiApproachReport');
-const ElrajhiReport = require('../../infrastructure/models/ElrajhiReport');
 
 const VALID_MODES = ['active', 'inactive', 'partial', 'demo'];
 
@@ -157,40 +152,25 @@ exports.getSystemStats = async (req, res) => {
         const [
             userCount,
             companyCount,
-            packageCount,
-            subscriptionCount,
             updateCount,
-            reportCount,
-            urgentCount,
-            duplicateCount,
-            multiApproachCount,
-            elrajhiCount
+            submitQuickCount,
+            urgentCount
         ] = await Promise.all([
             User.countDocuments(),
             Company.countDocuments(),
-            PackageModel.countDocuments(),
-            Subscription.countDocuments(),
             SystemUpdate.countDocuments(),
-            Report.countDocuments(),
-            UrgentReport.countDocuments(),
-            DuplicateReport.countDocuments(),
-            MultiApproachReport.countDocuments(),
-            ElrajhiReport.countDocuments()
+            SubmitReportsQuickly.countDocuments(),
+            UrgentReport.countDocuments()
         ]);
 
         const reportTypes = {
-            standard: reportCount,
-            urgent: urgentCount,
-            duplicate: duplicateCount,
-            multiApproach: multiApproachCount,
-            elrajhi: elrajhiCount
+            submitReportsQuickly: submitQuickCount,
+            urgent: urgentCount
         };
 
         const totals = {
             users: userCount,
             companies: companyCount,
-            packages: packageCount,
-            subscriptions: subscriptionCount,
             updates: updateCount,
             reports: Object.values(reportTypes).reduce((sum, value) => sum + value, 0)
         };
@@ -201,32 +181,17 @@ exports.getSystemStats = async (req, res) => {
 
         const [
             userDaily,
-            standardDaily,
-            urgentDaily,
-            duplicateDaily,
-            multiApproachDaily,
-            elrajhiDaily
+            submitQuickDaily,
+            urgentDaily
         ] = await Promise.all([
             aggregateDailyCounts(User, start),
-            aggregateDailyCounts(Report, start),
-            aggregateDailyCounts(UrgentReport, start),
-            aggregateDailyCounts(DuplicateReport, start),
-            aggregateDailyCounts(MultiApproachReport, start),
-            aggregateDailyCounts(ElrajhiReport, start)
+            aggregateDailyCounts(SubmitReportsQuickly, start),
+            aggregateDailyCounts(UrgentReport, start)
         ]);
 
         const reportDaily = mergeDailyCounts(
-            mergeDailyCounts(
-                mergeDailyCounts(
-                    mergeDailyCounts(
-                        mergeDailyCounts({}, standardDaily),
-                        urgentDaily
-                    ),
-                    duplicateDaily
-                ),
-                multiApproachDaily
-            ),
-            elrajhiDaily
+            mergeDailyCounts({}, submitQuickDaily),
+            urgentDaily
         );
 
         const labels = buildLast7Days();

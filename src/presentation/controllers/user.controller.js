@@ -2,18 +2,10 @@ const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const User = require("../../infrastructure/models/user");
 const Company = require("../../infrastructure/models/company");
-const Subscription = require("../../infrastructure/models/subscription");
-const Package = require("../../infrastructure/models/package");
 const StoredFile = require("../../infrastructure/models/storedFile");
 const SystemState = require("../../infrastructure/models/systemState");
 const SubmitReportsQuickly = require("../../infrastructure/models/SubmitReportsQuickly");
-const DuplicateReport = require("../../infrastructure/models/DuplicateReport");
-const Report = require("../../infrastructure/models/report");
 const UrgentReport = require("../../infrastructure/models/UrgentReport");
-const ElrajhiReport = require("../../infrastructure/models/ElrajhiReport");
-const MultiApproachReport = require("../../infrastructure/models/MultiApproachReport");
-const PointDeduction = require("../../infrastructure/models/pointDeduction");
-const PaymentRequest = require("../../infrastructure/models/paymentRequest");
 const Notification = require("../../infrastructure/models/notification");
 const UserUpdateStatus = require("../../infrastructure/models/userUpdateStatus");
 
@@ -27,6 +19,10 @@ const {
 } = require("../../application/services/files/fileStorage.service");
 const { normalizeOfficeId } = require("../utils/companyOffice");
 const {
+  CANONICAL_GUEST_PHONE,
+  isCanonicalGuestPhone,
+} = require("../constants/canonicalUser");
+const {
   normalizeTaqeemUsername,
   normalizeProfile,
   extractTaqeemUsernameFromProfile,
@@ -36,32 +32,18 @@ const {
   resolveDefaultCompanyOfficeId,
   safeString,
 } = require("../utils/taqeemUser");
+const { rebuildCompanesForUser } = require("./companes.controller");
 
-const buildUserPayload = (user) => ({
-  _id: user._id,
-  phone: user.phone,
-  phones: Array.isArray(user.phones) ? user.phones : [],
-  type: user.type,
-  role: user.role,
-  company: user.company,
-  companyName: user.companyName,
-  headName: user.headName,
-  taqeem: user.taqeem,
-  taqeemUser: user?.taqeem?.username || null,
-  defaultCompanyOfficeId: user?.taqeem?.defaultCompanyOfficeId || null,
-  permissions: user.permissions,
-  profileImagePath: user.profileImagePath || "",
-  profileImageFileId: user.profileImageFileId || null,
-  createdAt: user.createdAt,
-  updatedAt: user.updatedAt,
-});
-
-const DEFAULT_GUEST_LIMIT = 1;
-const DEFAULT_GUEST_FREE_POINTS = 400;
-const BOOTSTRAP_PACKAGE_ID =
-  process.env.BOOTSTRAP_PACKAGE_ID || "692efc0d41a4767cfb91821b";
-
+/** Once-per-process guard so we do not repeatedly inspect/create the phone index. */
 let phoneIndexEnsured = false;
+
+/** ~100 years unless REFRESH_COOKIE_DAYS is set (persistent login until logout). */
+const REFRESH_COOKIE_MAX_AGE_MS = (() => {
+  const fromEnv = Number(process.env.REFRESH_COOKIE_DAYS);
+  const days =
+    Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 365 * 100;
+  return days * 24 * 60 * 60 * 1000;
+})();
 
 const ensureUserPhoneSparseIndex = async () => {
   if (phoneIndexEnsured) return;
@@ -139,6 +121,36 @@ const normalizedPhone = (value) => {
   return trimmed || null;
 };
 
+/** App treats canonical phone 000 (and missing phone) as guest session. */
+const isAppGuestUser = (user) =>
+  !normalizedPhone(user?.phone) || isCanonicalGuestPhone(user.phone);
+
+const buildUserPayload = (user) => ({
+  _id: user._id,
+  phone: user.phone,
+  phones: Array.isArray(user.phones) ? user.phones : [],
+  type: user.type,
+  role: user.role,
+  company: user.company,
+  companyName: user.companyName,
+  headName: user.headName,
+  taqeem: user.taqeem,
+  taqeemUser: user?.taqeem?.username || null,
+  defaultCompanyOfficeId: user?.taqeem?.defaultCompanyOfficeId || null,
+  workspacePreferences: {
+    ramTabsPerGb:
+      user?.workspacePreferences?.ramTabsPerGb != null
+        ? user.workspacePreferences.ramTabsPerGb
+        : null,
+  },
+  permissions: user.permissions,
+  profileImagePath: user.profileImagePath || "",
+  profileImageFileId: user.profileImageFileId || null,
+  createdAt: user.createdAt,
+  updatedAt: user.updatedAt,
+  guest: isAppGuestUser(user),
+});
+
 const buildUserIdFilter = (userId) => {
   const userIdStr = String(userId || "").trim();
   if (!userIdStr) return null;
@@ -168,14 +180,11 @@ const syncGuestReportPhones = async (userId, phone) => {
 
   await Promise.all([
     SubmitReportsQuickly.updateMany(query, update),
-    DuplicateReport.updateMany(query, update),
-    Report.updateMany(query, update),
     UrgentReport.updateMany(query, update),
-    ElrajhiReport.updateMany(query, update),
   ]);
 };
 
-const isGuestOnlyUser = (user) => !normalizedPhone(user?.phone);
+const isGuestOnlyUser = (user) => isAppGuestUser(user);
 
 const buildReportOwnershipFilter = (userId) => {
   const userIdStr = String(userId || "").trim();
@@ -195,14 +204,7 @@ const moveReportOwnership = async (fromUserId, toUserId, taqeemUser = null) => {
   const toUserIdStr = String(toUserId || "").trim();
   if (!fromFilter || !toUserIdStr) return;
 
-  const reportModels = [
-    SubmitReportsQuickly,
-    DuplicateReport,
-    Report,
-    UrgentReport,
-    ElrajhiReport,
-    MultiApproachReport,
-  ];
+  const reportModels = [SubmitReportsQuickly, UrgentReport];
 
   const setPayload = { user_id: toUserIdStr };
   if (safeString(taqeemUser)) {
@@ -238,14 +240,7 @@ const syncReportTaqeemUser = async (
     ? { $and: [ownershipFilter, buildMissingTaqeemUserFilter()] }
     : ownershipFilter;
 
-  const reportModels = [
-    SubmitReportsQuickly,
-    DuplicateReport,
-    Report,
-    UrgentReport,
-    ElrajhiReport,
-    MultiApproachReport,
-  ];
+  const reportModels = [SubmitReportsQuickly, UrgentReport];
 
   await Promise.all(
     reportModels.map((Model) =>
@@ -260,14 +255,7 @@ const hasUserReferences = async (userId) => {
 
   const referenceCounts = await Promise.all([
     SubmitReportsQuickly.countDocuments(ownershipFilter),
-    DuplicateReport.countDocuments(ownershipFilter),
-    Report.countDocuments(ownershipFilter),
     UrgentReport.countDocuments(ownershipFilter),
-    ElrajhiReport.countDocuments(ownershipFilter),
-    MultiApproachReport.countDocuments(ownershipFilter),
-    Subscription.countDocuments({ userId }),
-    PointDeduction.countDocuments({ userId }),
-    PaymentRequest.countDocuments({ userId }),
     Notification.countDocuments({ userId }),
     UserUpdateStatus.countDocuments({ userId }),
     Company.countDocuments({ headUser: userId }),
@@ -375,18 +363,6 @@ const mergeGuestTaqeemUsers = async ({
     primaryUser?.taqeem?.username || null,
   );
   await Promise.all([
-    Subscription.updateMany(
-      { userId: secondaryUser._id },
-      { $set: { userId: primaryUser._id } },
-    ),
-    PointDeduction.updateMany(
-      { userId: secondaryUser._id },
-      { $set: { userId: primaryUser._id } },
-    ),
-    PaymentRequest.updateMany(
-      { userId: secondaryUser._id },
-      { $set: { userId: primaryUser._id } },
-    ),
     Notification.updateMany(
       { userId: secondaryUser._id },
       { $set: { userId: primaryUser._id } },
@@ -439,51 +415,6 @@ const setBootstrapUses = (user, uses) => {
   user.taqeem.bootstrap_used = next > 0;
 };
 
-const getGuestAccessConfig = async () => {
-  const state = await SystemState.getSingleton();
-  const enabled = state?.guestAccessEnabled !== false;
-  const limitRaw = Number(state?.guestAccessLimit);
-  const maxUses =
-    Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : DEFAULT_GUEST_LIMIT;
-  return { enabled, maxUses };
-};
-
-const resolveGuestFreePoints = async (pkg) => {
-  const systemState = await SystemState.getSingleton();
-  const configuredPoints = Number(systemState?.guestFreePoints);
-  if (Number.isFinite(configuredPoints) && configuredPoints > 0) {
-    return configuredPoints;
-  }
-
-  const pkgPoints = Number(pkg?.points);
-  if (Number.isFinite(pkgPoints) && pkgPoints > 0) {
-    return pkgPoints;
-  }
-
-  return DEFAULT_GUEST_FREE_POINTS;
-};
-
-const ensureFreeSubscription = async (user, options = {}) => {
-  if (!user?._id) return null;
-  const { allowPhone = false } = options;
-  if (!allowPhone && user.phone) return null;
-
-  const existing = await Subscription.findOne({ userId: user._id });
-  if (existing) return existing;
-
-  const pkg = await Package.findById(BOOTSTRAP_PACKAGE_ID);
-  if (!pkg) {
-    throw new Error("Package not found");
-  }
-
-  const freePoints = await resolveGuestFreePoints(pkg);
-  return Subscription.create({
-    userId: user._id,
-    packageId: pkg._id,
-    remainingPoints: freePoints,
-  });
-};
-
 const buildTokenPayload = (user) => ({
   id: user._id.toString(),
   phone: user.phone || null,
@@ -491,7 +422,7 @@ const buildTokenPayload = (user) => ({
   role: user.role || "user",
   company: user.company || null,
   permissions: user.permissions || [],
-  guest: !user.phone,
+  guest: isAppGuestUser(user),
   taqeemUser: user?.taqeem?.username || null,
   defaultCompanyOfficeId: user?.taqeem?.defaultCompanyOfficeId || null,
 });
@@ -505,7 +436,7 @@ const issueAuthTokens = (res, user, meta = {}) => {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "Strict",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: REFRESH_COOKIE_MAX_AGE_MS,
   });
 
   return res.json({
@@ -514,7 +445,7 @@ const issueAuthTokens = (res, user, meta = {}) => {
     refreshToken,
     userId: user._id,
     user: buildUserPayload(user),
-    guest: !user.phone,
+    guest: isAppGuestUser(user),
   });
 };
 
@@ -530,7 +461,7 @@ const taqeemAlreadyUsedPayload = (existingUser) => ({
   message:
     "This Taqeem user is already linked to another Value Tech account. Please login to Value Tech.",
   existingUserId: existingUser?._id || null,
-  guest: !existingUser?.phone,
+  guest: isAppGuestUser(existingUser),
 });
 
 const linkTaqeemUsernameToUser = async (user, username, password = "") => {
@@ -717,8 +648,6 @@ exports.register = async (req, res) => {
       }
     }
 
-    await ensureFreeSubscription(user, { allowPhone: true });
-
     const payload = buildTokenPayload(user);
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
@@ -727,7 +656,7 @@ exports.register = async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "Strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: REFRESH_COOKIE_MAX_AGE_MS,
     });
 
     res.status(201).json({
@@ -803,7 +732,7 @@ exports.login = async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "Strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: REFRESH_COOKIE_MAX_AGE_MS,
     });
 
     return res.status(200).json({
@@ -822,32 +751,24 @@ exports.login = async (req, res) => {
 
 exports.guestBootstrap = async (req, res) => {
   try {
-    let user = null;
-    if (req.userId) {
-      user = await User.findById(req.userId);
-    }
+    await ensureUserPhoneSparseIndex();
 
+    let user = await User.findOne({ phone: CANONICAL_GUEST_PHONE });
     if (!user) {
-      await ensureUserPhoneSparseIndex();
       try {
-        user = await User.create({});
+        user = await User.create({ phone: CANONICAL_GUEST_PHONE });
       } catch (createErr) {
-        const isDuplicatePhone =
-          createErr?.code === 11000 &&
-          (createErr?.keyPattern?.phone ||
-            String(createErr?.message || "").includes("phone_1"));
-        if (!isDuplicatePhone) {
+        if (createErr?.code === 11000) {
+          user = await User.findOne({ phone: CANONICAL_GUEST_PHONE });
+        }
+        if (!user) {
           throw createErr;
         }
-
-        await ensureUserPhoneSparseIndex();
-        user = await User.create({});
       }
     }
 
-    await ensureFreeSubscription(user);
     return issueAuthTokens(res, user, {
-      status: req.userId ? "GUEST_REFRESHED" : "GUEST_CREATED",
+      status: "GUEST_READY",
     });
   } catch (err) {
     return res
@@ -927,7 +848,6 @@ const handleTaqeemBootstrap = async (req, res) => {
     }
 
     await linkTaqeemUsernameToUser(authUser, trimmedUsername, password);
-    await ensureFreeSubscription(authUser, { allowPhone: true });
 
     return issueAuthTokens(res, authUser, {
       status: "NORMAL_ACCOUNT",
@@ -945,8 +865,6 @@ const handleTaqeemBootstrap = async (req, res) => {
       },
     });
 
-    await ensureFreeSubscription(user);
-
     return issueAuthTokens(res, user, {
       status: "BOOTSTRAP_GRANTED",
       reason: "NEW_TAQEEM_USER",
@@ -955,16 +873,6 @@ const handleTaqeemBootstrap = async (req, res) => {
 
   if (user.phone) {
     return res.status(409).json(taqeemAlreadyUsedPayload(user));
-  }
-
-  const { enabled, maxUses } = await getGuestAccessConfig();
-  const uses = getBootstrapUses(user);
-
-  if (enabled && uses >= maxUses) {
-    return res.status(403).json({
-      status: "LOGIN_REQUIRED",
-      reason: "GUEST_LIMIT_REACHED",
-    });
   }
 
   if (safeString(password) && !safeString(user?.taqeem?.password)) {
@@ -991,8 +899,6 @@ const handleTaqeemBootstrap = async (req, res) => {
       );
     }
   }
-
-  await ensureFreeSubscription(user);
 
   return issueAuthTokens(res, user, {
     status: "LOGIN_SUCCESS",
@@ -1092,10 +998,7 @@ exports.syncTaqeemSnapshot = async (req, res) => {
     }
 
     const incomingCompanies = normalizeCompanies(req.body?.companies || []);
-    targetUser.taqeem.companies = mergeCompanies(
-      targetUser.taqeem.companies || [],
-      incomingCompanies,
-    );
+    targetUser.taqeem.companies = incomingCompanies;
 
     const requestedOffice = normalizeOfficeId(
       req.body?.defaultCompanyOfficeId ||
@@ -1104,16 +1007,17 @@ exports.syncTaqeemSnapshot = async (req, res) => {
         null,
     );
 
+    const preferredOfficeId =
+      requestedOffice || targetUser.taqeem.defaultCompanyOfficeId || null;
+
     const resolvedDefaultOfficeId = resolveDefaultCompanyOfficeId(
-      requestedOffice,
+      preferredOfficeId,
       targetUser.taqeem.companies,
     );
 
-    if (resolvedDefaultOfficeId) {
-      targetUser.taqeem.defaultCompanyOfficeId = resolvedDefaultOfficeId;
-      if (!targetUser.taqeem.firstCompanySelectedAt) {
-        targetUser.taqeem.firstCompanySelectedAt = new Date();
-      }
+    targetUser.taqeem.defaultCompanyOfficeId = resolvedDefaultOfficeId || null;
+    if (resolvedDefaultOfficeId && !targetUser.taqeem.firstCompanySelectedAt) {
+      targetUser.taqeem.firstCompanySelectedAt = new Date();
     }
 
     targetUser.taqeem.lastSyncedAt = new Date();
@@ -1123,6 +1027,14 @@ exports.syncTaqeemSnapshot = async (req, res) => {
     }
 
     await targetUser.save();
+    try {
+      await rebuildCompanesForUser(targetUser);
+    } catch (companesErr) {
+      console.warn(
+        "[syncTaqeemSnapshot] Failed to rebuild companes collection:",
+        companesErr?.message || companesErr,
+      );
+    }
     try {
       await syncReportTaqeemUser(targetUser._id, requestedUsername);
     } catch (syncErr) {
@@ -1158,6 +1070,54 @@ exports.syncTaqeemSnapshot = async (req, res) => {
     console.error("syncTaqeemSnapshot error", err);
     return res.status(500).json({
       status: "ERROR",
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
+
+exports.patchWorkspacePreferences = async (req, res) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    const body = req.body || {};
+    if (!Object.prototype.hasOwnProperty.call(body, "ramTabsPerGb")) {
+      return res.status(400).json({
+        message: "Provide ramTabsPerGb (number 1–20, or null to use system default)",
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const raw = body.ramTabsPerGb;
+    if (!user.workspacePreferences) {
+      user.workspacePreferences = {};
+    }
+
+    if (raw === null || raw === "") {
+      user.workspacePreferences.ramTabsPerGb = null;
+    } else {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 1 || n > 20) {
+        return res.status(400).json({
+          message: "ramTabsPerGb must be between 1 and 20, or null",
+        });
+      }
+      user.workspacePreferences.ramTabsPerGb = Math.round(n);
+    }
+
+    await user.save();
+
+    return res.json({ user: buildUserPayload(user) });
+  } catch (err) {
+    console.error("patchWorkspacePreferences error", err);
+    return res.status(500).json({
       message: "Server error",
       error: err.message,
     });
@@ -1235,75 +1195,16 @@ exports.setDefaultTaqeemCompany = async (req, res) => {
 exports.authorizeTaqeem = async (req, res) => {
   try {
     const userId = req.userId;
-    const assetCount = Number(req.body.assetCount || 0);
-
     const user = await User.findById(userId);
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const checkPoints = async () => {
-      if (assetCount <= 0) return null;
-      const subscriptions = await Subscription.find({ userId });
-      const remainingPoints = subscriptions.reduce(
-        (sum, sub) => sum + (sub.remainingPoints || 0),
-        0,
-      );
-
-      if (assetCount > remainingPoints) {
-        return {
-          status: "INSUFFICIENT_POINTS",
-          required: assetCount,
-          available: remainingPoints,
-        };
-      }
-
-      return null;
-    };
-
-    if (user.phone && user.password) {
-      const insufficient = await checkPoints();
-      if (insufficient) {
-        return res.status(200).json(insufficient);
-      }
-
-      return res.json({
-        status: "AUTHORIZED",
-        reason: "NORMAL_ACCOUNT",
-        userId: user._id,
-      });
-    }
-
-    if (!user.taqeem) {
-      return res.status(400).json({
-        status: "NOT_AUTHORIZED",
-        message: "Taqeem account not configured",
-      });
-    }
-
-    const { enabled, maxUses } = await getGuestAccessConfig();
-    const uses = getBootstrapUses(user);
-    if (enabled && uses >= maxUses) {
-      return res.status(403).json({
-        status: "LOGIN_REQUIRED",
-        reason: "BOOTSTRAP_LIMIT_REACHED",
-      });
-    }
-
-    const insufficient = await checkPoints();
-    if (insufficient) {
-      return res.status(200).json(insufficient);
-    }
-
-    if (enabled) {
-      setBootstrapUses(user, uses + 1);
-      await user.save();
-    }
-
+    // لا باقات ولا خصم نقاط — السماح بالأتمتة طالما التوكن صالح.
     return res.json({
       status: "AUTHORIZED",
-      reason: enabled ? "BOOTSTRAP_ACTIVATED" : "BOOTSTRAP_UNLIMITED",
+      reason: "NO_PACKAGE_POLICY",
       userId: user._id,
     });
   } catch (err) {

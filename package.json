@@ -2,16 +2,10 @@
   "name": "electron-backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
     "dev": "nodemon --watch src --exec node src/index.js",
-    "start": "node src/index.js",
-    "test": "jest",
-    "prisma:migrate": "npx prisma migrate dev --name init",
-    "updated": "git fetch origin && git reset --hard origin/main && git clean -fd && npm install && npm run dev",
-    "push": "node bump_push.js",
-    "prisma:generate": "npx prisma generate",
-    "prisma:studio": "npx prisma studio"
+    "start": "node src/index.js"
   },
   "keywords": [],
   "author": "",

@@ -367,8 +367,22 @@ exports.processSubmitReportsQuicklyBatch = async (req, res) => {
     );
     const resolvedPhone = authUser?.phone || req.user?.phone || null;
     const resolvedCompany = authUser?.company || req.user?.company || null;
-    const isGuestToken = Boolean(req.user?.guest) && !resolvedPhone;
-    const resolvedCompanyOfficeId = isGuestToken ? null : companyOfficeId;
+
+    if (!taqeemUser) {
+      return res.status(400).json({
+        status: "failed",
+        error:
+          "Taqeem login required: link your Taqeem account (new-bootstrap) before uploading reports.",
+      });
+    }
+    if (!companyOfficeId) {
+      return res.status(400).json({
+        status: "failed",
+        error:
+          "Company office is required: select a company before uploading reports.",
+      });
+    }
+    const resolvedCompanyOfficeId = companyOfficeId;
 
     console.log("=== PDF PATH DEBUGGING ===");
     console.log("1. skipPdfUpload:", skipPdfUpload);
@@ -705,7 +719,7 @@ exports.processSubmitReportsQuicklyBatch = async (req, res) => {
       // 3.6 Build document for this Excel
       docsToInsert.push({
         user_id,
-        user_phone: isGuestToken ? null : resolvedPhone,
+        user_phone: resolvedPhone || null,
         taqeem_user: taqeemUser || null,
         company: resolvedCompany || null,
         company_office_id: resolvedCompanyOfficeId,
@@ -773,32 +787,30 @@ exports.listSubmitReportsQuickly = async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    const limit = Math.min(Number(req.query.limit) || 200, 500);
-    const companyOfficeId = extractCompanyOfficeId(req);
-    const unassignedOnly = ["1", "true", "yes"].includes(
-      String(req.query.unassigned || "")
-        .trim()
-        .toLowerCase(),
-    );
-    const unassignedFilter = {
-      $or: [
-        { company_office_id: { $exists: false } },
-        { company_office_id: null },
-        { company_office_id: "" },
-      ],
-    };
-    const ownerQuery = req.user?.taqeemUser
-      ? {
-          $or: [{ user_id: req.user.id }, { taqeem_user: req.user.taqeemUser }],
-        }
-      : { user_id: req.user.id };
+    const taqeemUserNorm = normalizeTaqeemUsername(req.user?.taqeemUser);
+    if (!taqeemUserNorm) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Taqeem session required. Complete Taqeem login and link the account first.",
+      });
+    }
 
-    const scopedQuery = unassignedOnly
-      ? unassignedFilter
-      : companyOfficeId
-        ? { company_office_id: companyOfficeId }
-        : {};
-    const query = { $and: [ownerQuery, scopedQuery] };
+    const companyOfficeId = extractCompanyOfficeId(req);
+    if (!companyOfficeId) {
+      return res.status(400).json({
+        success: false,
+        message: "companyOfficeId is required.",
+      });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
+    const ownerQuery = {
+      $or: [{ user_id: req.user.id }, { taqeem_user: taqeemUserNorm }],
+    };
+    const query = {
+      $and: [ownerQuery, { company_office_id: companyOfficeId }],
+    };
     const reports = await SubmitReportsQuickly.find(query)
       .sort({ createdAt: -1, _id: -1 })
       .limit(limit);
@@ -812,7 +824,6 @@ exports.listSubmitReportsQuickly = async (req, res) => {
 
 exports.getQuickReportsByUserId = async (req, res) => {
   try {
-    console.log("user", req.user);
     const user_id =
       req.user?.id || req.user?._id || req.user?.userId || req.user?.user_id;
 
@@ -823,54 +834,55 @@ exports.getQuickReportsByUserId = async (req, res) => {
       });
     }
 
-    const limit = Math.min(Number(req.query.limit) || 10, 100); // Default 10, max 100
+    const taqeemUserNorm = normalizeTaqeemUsername(req.user?.taqeemUser);
+    if (!taqeemUserNorm) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Taqeem session required. Complete Taqeem login and link the account first.",
+      });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 10, 100);
     const page = Math.max(Number(req.query.page) || 1, 1);
     const skip = (page - 1) * limit;
     const companyOfficeId = extractCompanyOfficeId(req);
-    const unassignedOnly = ["1", "true", "yes"].includes(
-      String(req.query.unassigned || "")
-        .trim()
-        .toLowerCase(),
-    );
-    const baseQuery = req.user?.taqeemUser
-      ? { $or: [{ user_id }, { taqeem_user: req.user.taqeemUser }] }
-      : { user_id };
-    let query = baseQuery;
-    if (unassignedOnly) {
-      query = {
-        $and: [
-          baseQuery,
-          {
-            $or: [
-              { company_office_id: { $exists: false } },
-              { company_office_id: null },
-              { company_office_id: "" },
-            ],
-          },
-        ],
-      };
-    } else if (companyOfficeId) {
-      query = { ...baseQuery, company_office_id: companyOfficeId };
+    if (!companyOfficeId) {
+      return res.status(400).json({
+        success: false,
+        message: "companyOfficeId is required.",
+      });
     }
+
+    const baseQuery = {
+      $or: [{ user_id }, { taqeem_user: taqeemUserNorm }],
+    };
+    const query = {
+      $and: [baseQuery, { company_office_id: companyOfficeId }],
+    };
 
     const [reports, total] = await Promise.all([
       SubmitReportsQuickly.find(query)
         .sort({ createdAt: -1, _id: -1 })
         .skip(skip)
         .limit(limit)
-        .lean(), // Add .lean() for better performance
+        .lean(),
       SubmitReportsQuickly.countDocuments(query),
     ]);
 
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
     return res.json({
       success: true,
+      data: reports,
       reports,
       pagination: {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit),
-        hasNextPage: page < Math.ceil(total / limit),
+        totalItems: total,
+        totalPages,
+        hasNextPage: page < totalPages,
         hasPrevPage: page > 1,
       },
     });

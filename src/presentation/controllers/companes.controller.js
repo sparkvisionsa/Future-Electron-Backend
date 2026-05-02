@@ -70,6 +70,17 @@ const upsertLegacyCompanes = async (user, companies = []) => {
     );
 };
 
+/**
+ * Replace `companes` rows for this user to match `user.taqeem.companies` (after save).
+ */
+const rebuildCompanesForUser = async (user) => {
+    if (!user?._id) return;
+    await Companes.deleteMany({ user: user._id });
+    await upsertLegacyCompanes(user, user.taqeem.companies || []);
+};
+
+exports.rebuildCompanesForUser = rebuildCompanesForUser;
+
 exports.syncCompanies = async (req, res) => {
     try {
         const userId = resolveUserId(req);
@@ -97,7 +108,8 @@ exports.syncCompanies = async (req, res) => {
             user.taqeem.username = taqeemUser;
         }
 
-        user.taqeem.companies = mergeCompanies(user.taqeem.companies || [], incomingCompanies);
+        // Authoritative snapshot from Taqeem for this sync (add/remove offices match Taqeem).
+        user.taqeem.companies = incomingCompanies;
 
         const requestedDefaultOfficeId = normalizeOfficeId(
             req.body?.defaultCompanyOfficeId ||
@@ -106,22 +118,22 @@ exports.syncCompanies = async (req, res) => {
                 null,
         );
 
+        const preferredOfficeId = requestedDefaultOfficeId || user.taqeem.defaultCompanyOfficeId || null;
+
         const defaultOfficeId = resolveDefaultCompanyOfficeId(
-            requestedDefaultOfficeId,
+            preferredOfficeId,
             user.taqeem.companies,
         );
 
-        if (defaultOfficeId) {
-            user.taqeem.defaultCompanyOfficeId = defaultOfficeId;
-            if (!user.taqeem.firstCompanySelectedAt) {
-                user.taqeem.firstCompanySelectedAt = new Date();
-            }
+        user.taqeem.defaultCompanyOfficeId = defaultOfficeId || null;
+        if (defaultOfficeId && !user.taqeem.firstCompanySelectedAt) {
+            user.taqeem.firstCompanySelectedAt = new Date();
         }
 
         user.taqeem.lastSyncedAt = new Date();
         await user.save();
 
-        await upsertLegacyCompanes(user, incomingCompanies).catch((err) => {
+        await rebuildCompanesForUser(user).catch((err) => {
             console.warn('[companes.sync] Failed to sync legacy companes collection:', err?.message || err);
         });
 
@@ -150,23 +162,8 @@ exports.listMyCompanies = async (req, res) => {
         const normalizedType = type ? normalizeType(type) : null;
 
         const user = await User.findById(userId).lean();
-        const taqeemCompanies = Array.isArray(user?.taqeem?.companies)
-            ? user.taqeem.companies
-            : [];
-
-        if (taqeemCompanies.length > 0) {
-            const filtered = normalizedType
-                ? taqeemCompanies.filter((item) => normalizeType(item.type) === normalizedType)
-                : taqeemCompanies;
-
-            return res.status(200).json({
-                status: 'SUCCESS',
-                data: filtered,
-                meta: {
-                    defaultCompanyOfficeId: user?.taqeem?.defaultCompanyOfficeId || null,
-                    taqeemUser: user?.taqeem?.username || null,
-                },
-            });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
         }
 
         const legacyFilter = { user: userId };
@@ -174,15 +171,26 @@ exports.listMyCompanies = async (req, res) => {
             legacyFilter.type = normalizedType;
         }
 
-        const legacyItems = await Companes.find(legacyFilter).sort({ createdAt: -1 }).lean();
+        const fromDb = await Companes.find(legacyFilter).sort({ updatedAt: -1 }).lean();
+        const taqeemEmbedded = Array.isArray(user?.taqeem?.companies)
+            ? user.taqeem.companies
+            : [];
+
+        const normalizedFromDb = normalizeCompanies(fromDb);
+        const mergedList = mergeCompanies(normalizedFromDb, taqeemEmbedded);
+
+        const filtered = normalizedType
+            ? mergedList.filter((item) => normalizeType(item.type) === normalizedType)
+            : mergedList;
 
         return res.status(200).json({
             status: 'SUCCESS',
-            data: legacyItems,
+            data: filtered,
             meta: {
-                defaultCompanyOfficeId: null,
+                defaultCompanyOfficeId: user?.taqeem?.defaultCompanyOfficeId || null,
                 taqeemUser: user?.taqeem?.username || null,
-                source: 'legacy-companes',
+                source:
+                    fromDb.length > 0 || taqeemEmbedded.length > 0 ? 'merged' : null,
             },
         });
     } catch (err) {

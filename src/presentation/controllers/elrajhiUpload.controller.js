@@ -5,7 +5,9 @@ const fs = require("fs");
 const mongoose = require("mongoose");
 
 const UrgentReport = require("../../infrastructure/models/UrgentReport");
+const User = require("../../infrastructure/models/user");
 const { extractCompanyOfficeId } = require("../utils/companyOffice");
+const { normalizeTaqeemUsername } = require("../utils/taqeemUser");
 
 // ---------- helpers ----------
 
@@ -150,7 +152,14 @@ const buildOwnerQuery = (userContext = {}) => {
 
 function fixMojibake(str) {
   if (!str) return "";
-  return Buffer.from(str, "latin1").toString("utf8");
+  const value = String(str);
+  // UTF-8 bytes mis-decoded as Latin-1 often contain these code units (not Arabic text).
+  const mojibakeSentinels = /[\u00C3\u00C2\u00D8\u00D9\u00F0]/;
+  if (!mojibakeSentinels.test(value)) return value;
+
+  const decoded = Buffer.from(value, "latin1").toString("utf8");
+  if (!decoded || decoded.includes("�")) return value;
+  return decoded;
 }
 
 function toYMDFromDate(d) {
@@ -431,15 +440,52 @@ exports.processElrajhiExcel = async (req, res) => {
     }
 
     const userContext = req.user || {};
+    const userId =
+      userContext.id ||
+      userContext._id ||
+      userContext.userId ||
+      userContext.user_id ||
+      null;
+    let authUser = null;
+    if (userId && mongoose.Types.ObjectId.isValid(String(userId))) {
+      try {
+        authUser = await User.findById(userId)
+          .select("phone company taqeem.username")
+          .lean();
+      } catch (err) {
+        console.warn(
+          "[ElRajhi] Could not load user for Taqeem fallback:",
+          err?.message || err,
+        );
+      }
+    }
+
     const userPhone =
+      authUser?.phone ||
       userContext.phone ||
       userContext.phoneNumber ||
       userContext.mobile ||
       userContext.username ||
       "";
-    const userId = userContext.id || userContext._id || null;
-    const taqeemUser = userContext.taqeemUser || null;
+    const taqeemUser = normalizeTaqeemUsername(
+      userContext.taqeemUser ||
+        userContext.taqeem?.username ||
+        authUser?.taqeem?.username ||
+        null,
+    );
     const companyOfficeId = extractCompanyOfficeId(req);
+
+    if (!taqeemUser) {
+      console.warn(
+        "[ElRajhi] No Taqeem username found on JWT/user record; continuing with user_id ownership because the desktop auth guard already confirmed the live Taqeem browser session.",
+      );
+    }
+    if (!companyOfficeId || !String(companyOfficeId).trim()) {
+      return res.status(400).json({
+        status: "failed",
+        error: "Company office is required. Select a company before uploading.",
+      });
+    }
 
     const excelFile = req.files.excel[0].path;
     const sourceExcelName = req.files.excel[0].originalname || "elrajhi.xlsx";
@@ -530,11 +576,9 @@ exports.processElrajhiExcel = async (req, res) => {
         });
       }
     } else if (!valuerCols.hasValuerColumns) {
-      return res.status(400).json({
-        status: "failed",
-        error:
-          "Valuers are required. Select valuers from Taqeem before sending.",
-      });
+      console.warn(
+        "[ElRajhi] No selected valuers and no valuer columns in Excel; saving reports without additional valuers.",
+      );
     }
 
     // ============= PDF MAPPING WITH MOJIBAKE-AWARE PATH RESOLUTION =============
@@ -774,7 +818,7 @@ exports.processElrajhiExcel = async (req, res) => {
         user_id: userId,
         user_phone: userPhone,
         taqeem_user: taqeemUser,
-        company: userContext.company || null,
+        company: authUser?.company || userContext.company || null,
         company_office_id: companyOfficeId,
 
         title: report.title,

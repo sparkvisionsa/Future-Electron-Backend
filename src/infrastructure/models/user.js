@@ -43,6 +43,9 @@ const userSchema = new mongoose.Schema({
         bootstrap_used: { type: Boolean, default: false },
         bootstrap_uses: { type: Number, default: 0 },
     },
+    workspacePreferences: {
+        ramTabsPerGb: { type: Number, default: null },
+    },
     permissions: { type: [String], default: [] }
 }, { timestamps: true });
 
